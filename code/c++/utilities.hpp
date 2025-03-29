@@ -76,8 +76,8 @@ class Matrix2D{
     private:
     int rows, cols; ///< Number of rows in the matrix
     std::vector<std::vector<float>> data; ///< Matrix data storage.
-
 };
+
 
 /**
  * @brief Checks whether two RNA bases can form a valid pair.
@@ -87,12 +87,14 @@ class Matrix2D{
  */
 bool can_pair(char base1, char base2);
 
+
 /**
  * @brief Prints the base pairings of an RNA sequence.
  * @param sequence The RNA sequence.
  * @param S A vector of paired indices.
  */
 void print_pairing(const std::string& sequence, const std::vector<std::pair<int,int> >& S);
+
 
 /**
  * @brief Converts a base pair list into a dot-bracket notation.
@@ -102,12 +104,14 @@ void print_pairing(const std::string& sequence, const std::vector<std::pair<int,
  */
 std::string bplist2db(const std::vector<std::pair<int,int> >& S,int size);
 
+
 /**
  * @brief Converts a dot-bracket notation into a base pair list.
  * @param structure Dot-bracket notation of the RNA secondary structure.
  * @return A pair consisting of a vector of base pairs and the structure length.
  */
 std::pair<std::vector<std::pair<int,int> >,int> db2bplist(const std::string& structure);
+
 
 /**
  * @brief Prints a formatted matrix with an associated sequence.
@@ -118,6 +122,14 @@ std::pair<std::vector<std::pair<int,int> >,int> db2bplist(const std::string& str
 void print_matrix(const Matrix2D& m, const std::string& sequence, int cellWidth = 3);
 
 
+/**
+ * @brief Adds a strand to the strands map if it is not already present.
+ * 
+ * @param strands A map of strand indices to their sequences.
+ * @param strand The strand sequence to be added.
+ */
+void add_strand_if_unique(std::unordered_map<int, std::string>& strands, const std::string& strand);
+
 
 /**
  * @brief Generates a random RNA sequence of a given length.
@@ -125,6 +137,7 @@ void print_matrix(const Matrix2D& m, const std::string& sequence, int cellWidth 
  * @return A randomly generated RNA sequence.
  */
 std::string generate_random_sequence(int length);
+
 
 /**
  * @brief Generates a Triplet Repeat.

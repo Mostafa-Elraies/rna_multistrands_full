@@ -250,6 +250,24 @@ void print_matrix(const Matrix2D& m, const std::string& sequence, int cellWidth)
 
 
 
+// Function to add a strand to the dictionary only if it is not already present
+void add_strand_if_unique(std::unordered_map<int, std::string>& strands, const std::string& strand) {
+    // Check if the strand already exists in the dictionary
+    for (const auto& pair : strands) {
+        if (pair.second == strand) {
+            // Strand already exists, do not add it
+            return;
+        }
+    }
+
+    // If the strand is not found, add it with the next available index
+    int next_index = strands.size() + 1;
+    strands[next_index] = strand;
+}
+
+
+
+
 /**
  * @brief Generate a random RNA sequence of a given length.
  * 

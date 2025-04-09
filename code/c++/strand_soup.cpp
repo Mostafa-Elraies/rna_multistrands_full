@@ -900,7 +900,7 @@ void compute_all_triplet_repartition(int number_of_repeats,int m_start){
 
     // Display elapsed time
     std::cout << "\nComputation completed in " << elapsed_time.count() << " seconds." << std::endl;
-    std::cout << "Results saved to internal.csv, homogeneous.csv, and heterogeneous.csv" << std::endl;
+    std::cout << "Results saved to " << internal_filename << "," << homogeneous_filename << ", " <<  heterogeneous_filename << std::endl;
 }
 
 
@@ -923,8 +923,8 @@ int main() {
     auto start_time = std::chrono::high_resolution_clock::now(); // To check the time of the computation
 
     std::cout << "\n========== Setting the parameters ==========" << std::endl;
-    int m_start = 2; // Number of sequences in total  //TODO : This parameter can be changed
-    int number_of_repeats = 2; // Number of triplet repeats within each strand //TODO : This parameter can be changed
+    int m_start = 4; // Number of sequences in total  //TODO : This parameter can be changed
+    int number_of_repeats = 10; // Number of triplet repeats within each strand //TODO : This parameter can be changed
     int sequence_length = number_of_repeats * 3; // length of the sequences
     std::cout << "  Number of strands : m = " << m_start << std::endl;
     std::cout << "  Length of the sequences : " << sequence_length << std::endl;
@@ -934,8 +934,9 @@ int main() {
 
     std::cout << "\n========== Generation of the strands ==========" << std::endl;
     std::unordered_map<int, std::string> strands;
-    strands[1] = generate_triplet_repeat("CCU", number_of_repeats); //TODO : The triplet can be changed
-    strands[2] = generate_triplet_repeat("GGA", number_of_repeats); //TODO : The triplet can be changed
+    strands[1] = generate_triplet_repeat("GUU", number_of_repeats); //TODO : The triplet can be changed
+    strands[2] = generate_triplet_repeat("CAG", number_of_repeats); //TODO : The triplet can be changed
+    strands[3] = generate_triplet_repeat("ACG", number_of_repeats); //TODO : The triplet can be changed
     std::cout << "Generated strands:" << std::endl;
     for (const auto& pair : strands){
         std::cout << "  Index " << pair.first << " : " << pair.second << std::endl;
@@ -974,7 +975,7 @@ int main() {
     std::cout << std::endl << "========== compute_all_triplet_repartition ==========" << std::endl;
     // around 30 minutes for m_start = 2 and strand_length = 10*3
     // 40s for m_start = 2 and strand_length = 2*3
-    compute_all_triplet_repartition(2,2); //TODO : The Two parameters (number_of_repeats, m_start) can be changed
+    // compute_all_triplet_repartition(6,4); //TODO : The Two parameters (number_of_repeats, m_start) can be changed
 
 
 

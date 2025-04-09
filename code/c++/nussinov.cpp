@@ -135,7 +135,7 @@ void Backtrack(int i, int j, const Matrix2D& m, const std::string& sequence, std
  */
 int main() {
     std::cout << std::endl << "========== Nussinov test ==========" << std::endl;
-    std::string a_sequence = "$GCAACUGGCACAAAGGCCUCCUGG"; // Example RNA sequence
+    std::string a_sequence = "$GCAACUGGCACAAAGGCCUCCUGG"; // Example RNA sequence //TODO : can be changed
     int len_seq = a_sequence.size()-1;
 
     std::cout << "Input Sequence: " << a_sequence << std::endl;

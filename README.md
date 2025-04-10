@@ -335,13 +335,25 @@ Pairs:  (1,29,2,1) (1,28,2,2) (1,27,2,3) (1,26,2,4) (1,25,2,5) (1,24,2,6) (1,23,
 
 Heatmaps for the repartition of base pairs :
 
-
-n = 9*3 and m = 3
 Computation completed in 4844.99 seconds.
 
+![heatmap](results/heatmaps/internal_m2.png)
+![heatmap](results/heatmaps/homogeneous_m2.png)
+![heatmap](results/heatmaps/heterogeneous_m2.png)
+
+![heatmap](results/heatmaps/internal_m3.png)
+![heatmap](results/heatmaps/homogeneous_m3.png)
+![heatmap](results/heatmaps/heterogeneous_m3.png)
 
 
+The heatmaps are similar to the ones from the reference paper. We still have some strange elements present in them. They might come from the backtracking thta only backtracks one output for every starting point. This induces a bias as we only considering the first case tested if multiple are possible. 
 
+
+---
+
+Thanks for reading 
+
+---
 
 
 

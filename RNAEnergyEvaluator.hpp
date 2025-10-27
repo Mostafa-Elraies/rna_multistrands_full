@@ -41,7 +41,15 @@ public:
     const Matrix& get_C(int s) const { return C_s.at(s); }
     const Matrix& get_M(int s) const { return M_s.at(s); }
     const Matrix& get_M1(int s) const { return M1_s.at(s); }
-    const vrna_param_t* get_params() const { return params; }
+    const std::unordered_map<int, std::string>& get_strands() const {
+        return strands;
+    }
+    const std::unordered_map<int, short*>& get_S1_map() const {
+        return S1_map;
+    }
+        
+    vrna_param_t* get_params() const { return params; }
+
 
 private:
     // --- Data structures ---

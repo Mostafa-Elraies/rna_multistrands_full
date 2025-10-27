@@ -471,8 +471,11 @@ vrna_md_set_default(&md);
 
 
  void ClosedCaseMinimization(int m, int s, int i, int r, int j, 
-    std::unordered_map<int, std::string> strands, Matrix5D& C, Matrix6D& F, Matrix5D& M,
-    RNAEnergyEvaluator& evaluator, vrna_param_t *params) {
+    std::unordered_map<int, std::string> strands, 
+    Matrix5D& C, Matrix6D& F, Matrix5D& M,
+    RNAEnergyEvaluator& evaluator, vrna_param_t* params)
+
+ {
 
  float min_value = inf_energy;
 
@@ -660,17 +663,20 @@ int type = vrna_get_ptype_md(strands.at(s)[i+1], strands.at(t)[k], &md);
 /// @param C 
 /// @param M 
 /// @param nussinov_matrices 
+
 void MMatrixMinimization(int m, int s, int i, int r, int j,
     const std::unordered_map<int, std::string>& strands,
-    Matrix5D& C, Matrix5D& M,
+    Matrix5D& C, Matrix5D& M, Matrix6D& F,
     RNAEnergyEvaluator& evaluator,
-    vrna_param_t* params) {
-if (i == int(strands.at(s).length()) || j == 0) {
-M(m, s, i, r, j) = inf_energy;
-} else {
-M(m, s, i, r, j) = MultipleCaseMinimization(m, s, i, r, j, strands, C, M, F, evaluator, params);
+    vrna_param_t* params)
+{
+    if (i == int(strands.at(s).length()) || j == 0) {
+        M(m, s, i, r, j) = inf_energy;
+    } else {
+        M(m, s, i, r, j) = MultipleCaseMinimization(m, s, i, r, j, strands, C, M, F, evaluator, params);
+    }
 }
-}
+
 
 /**
  * @brief Computes the 6D matrix for the RNA strand soup problem
@@ -695,7 +701,8 @@ for (int j = 0; j <= F.get_j_size() + 1; j++) {
 
    // 
    ClosedCaseMinimization(m, s, i, r, j, strands, C, F, M, evaluator, params);
-   MMatrixMinimization(m, s, i, r, j, strands, C, M, evaluator, params);
+   MMatrixMinimization(m, s, i, r, j, strands, C, M, F, evaluator, params);
+
 
    for (int c = 0; c <= 1; c++) {
     if (i > int(strands.at(s).length() - 1)) {
@@ -751,6 +758,10 @@ for (int j = 0; j <= F.get_j_size() + 1; j++) {
         }
     }
 }
+}
+}
+}
+}} }
 //======================================    Backtrack functions    ==============================================//
 
 
@@ -783,8 +794,185 @@ std::vector<std::vector<int>>  Find_all_start_backtrack(Matrix6D& M){
         throw std::runtime_error("No valid starting point found by Find_start_backtrack in the given energy matrix");
     }
     return starting_points;
-}// We need to define the square_backtrack header before the bubble_backtrack function because it is called by it.
+}
+/**
+ * ============================================================
+ *  Single-strand thermodynamic backtracking functions
+ *  (Turner/Vienna model version)
+ * ============================================================
+ *  These replace the old Nussinov backtrack and reconstruct the
+ *  optimal secondary structure of a single RNA using the
+ *  thermodynamic matrices: F, C, M, and M1.
+ *  Each function returns an output_backtrack object so that the
+ *  same data structure can be merged into multistrand backtracking.
+ * ============================================================
+ */
 
+ output_backtrack backtrack_Fs(int s, int i, int j, RNAEnergyEvaluator& evaluator, int theta);
+ output_backtrack backtrack_Cs(int s, int i, int j, RNAEnergyEvaluator& evaluator, int theta);
+ output_backtrack backtrack_Ms(int s, int i, int j, RNAEnergyEvaluator& evaluator, int theta);
+ output_backtrack backtrack_M1s(int s, int i, int j, RNAEnergyEvaluator& evaluator, int theta);
+ 
+ /*-------------------------------------------------------------
+  *  F-matrix (external / free region)
+  *------------------------------------------------------------*/
+ output_backtrack backtrack_Fs(int s, int i, int j, RNAEnergyEvaluator& evaluator, int theta) {
+    output_backtrack out;
+    if (i >= j) return out;
+
+    const auto& F = evaluator.get_F(s);
+    const auto& C = evaluator.get_C(s);
+    const std::string& seq = evaluator.get_strands().at(s);
+
+    int best = F[i][j];
+
+    // Case 1: i unpaired
+    if (i + 1 <= j && best == F[i + 1][j]) {
+        return backtrack_Fs(s, i + 1, j, evaluator, theta);
+    }
+
+    // Case 2: i paired with k
+    for (int k = i + theta + 1; k <= j; ++k) {
+        if (!can_pair(seq[i - 1], seq[k - 1])) continue;
+
+        int cand = C[i][k];
+        if (k + 1 <= j) cand += F[k + 1][j];
+
+        if (best == cand) {
+            output_backtrack left  = backtrack_Cs(s, i, k, evaluator, theta);
+            output_backtrack right = backtrack_Fs(s, k + 1, j, evaluator, theta);
+            left.merge(right);
+            return left;
+        }
+    }
+
+    return out;
+}  // <--- only one closing brace here
+
+ 
+ /*-------------------------------------------------------------
+  *  C-matrix (closed pair region)
+  *------------------------------------------------------------*/
+ output_backtrack backtrack_Cs(int s, int i, int j, RNAEnergyEvaluator& evaluator, int theta) {
+     output_backtrack out;
+     const auto& C = evaluator.get_C(s);
+     const auto& M = evaluator.get_M(s);
+     const auto& M1 = evaluator.get_M1(s);
+     const std::string& seq = evaluator.get_strands().at(s);
+     const vrna_param_t* params = evaluator.get_params();
+ 
+     int best = C[i][j];
+     out.add_pair(1, i, 1, j); // record (i,j)
+ 
+     // --- Hairpin ---
+     if (best == evaluator.hairpin_energy(i, j, s)) {
+         return out;
+     }
+ 
+     // --- Internal loops ---
+     for (int p = i + 1; p < j - theta - 1; ++p) {
+         for (int q = p + theta + 1; q < j; ++q) {
+             if (!can_pair(seq[p - 1], seq[q - 1])) continue;
+             int e_int = evaluator.interior_loop_energy(i, j, p, q, s);
+             if (best == C[p][q] + e_int) {
+                 output_backtrack inner = backtrack_Cs(s, p, q, evaluator, theta);
+                 out.merge(inner);
+                 return out;
+             }
+         }
+     }
+ 
+     // --- Multiloop closure ---
+     for (int u = i + 1; u < j; ++u) {
+         if (best == M1[i + 1][u - 1] + M[u][j - 1] + params->MLclosing) {
+             output_backtrack left = backtrack_M1s(s, i + 1, u - 1, evaluator, theta);
+             output_backtrack right = backtrack_Ms(s, u, j - 1, evaluator, theta);
+             out.merge(left);
+             out.merge(right);
+             return out;
+         }
+     }
+ 
+     return out; // fallback
+ }
+ 
+ /*-------------------------------------------------------------
+  *  M-matrix (multiloop segment)
+  *------------------------------------------------------------*/
+ output_backtrack backtrack_Ms(int s, int i, int j, RNAEnergyEvaluator& evaluator, int theta) {
+     output_backtrack out;
+     const auto& M = evaluator.get_M(s);
+     const auto& C = evaluator.get_C(s);
+     const auto& S1 = evaluator.get_S1_map().at(s);
+     vrna_param_t* params = evaluator.get_params();
+
+ 
+     int best = M[i][j];
+ 
+     // Case 1: j unpaired
+     if (best == M[i][j - 1] + params->MLbase) {
+         return backtrack_Ms(s, i, j - 1, evaluator, theta);
+     }
+ 
+     // Case 2: segmentation (M | C)
+     for (int u = i; u < j; ++u) {
+         int type = vrna_get_ptype_md(S1[u + 1], S1[j], &params->model_details);
+         int penalty = params->MLintern[type];
+         if (best == M[i][u] + C[u + 1][j] + penalty) {
+             output_backtrack left = backtrack_Ms(s, i, u, evaluator, theta);
+             output_backtrack right = backtrack_Cs(s, u + 1, j, evaluator, theta);
+             left.merge(right);
+             return left;
+         }
+     }
+ 
+     // Case 3: start directly from a C
+     for (int u = i; u < j; ++u) {
+         int type = vrna_get_ptype_md(S1[u + 1], S1[j], &params->model_details);
+         int penalty = params->MLintern[type];
+         if (best == C[u + 1][j] + penalty) {
+             return backtrack_Cs(s, u + 1, j, evaluator, theta);
+         }
+     }
+ 
+     return out;
+ }
+ 
+ /*-------------------------------------------------------------
+  *  M1-matrix (multiloop entry segment)
+  *------------------------------------------------------------*/
+ output_backtrack backtrack_M1s(int s, int i, int j, RNAEnergyEvaluator& evaluator, int theta) {
+     output_backtrack out;
+     const auto& M1 = evaluator.get_M1(s);
+     const auto& C = evaluator.get_C(s);
+     const auto& S1 = evaluator.get_S1_map().at(s);
+     vrna_param_t* params = evaluator.get_params();
+ 
+     int best = M1[i][j];
+ 
+     // Case 1: j unpaired
+     if (best == M1[i][j - 1] + params->MLbase) {
+         return backtrack_M1s(s, i, j - 1, evaluator, theta);
+     }
+ 
+     // Case 2: helix at (i,j)
+     int type = vrna_get_ptype_md(S1[i], S1[j], &params->model_details);
+     int penalty = params->MLintern[type];
+     if (best == C[i][j] + penalty) {
+         output_backtrack inner = backtrack_Cs(s, i, j, evaluator, theta);
+         out.merge(inner);
+         return out;
+     }
+ 
+     return out;}
+
+/**
+ * ============================================================
+ 
+ * ============================================================
+ */
+
+ // We need to define the square_backtrack header before the bubble_backtrack function because it is called by it.
 
 output_backtrack square_backtrack(int m, int s, int i, int r, int j, int c, std::unordered_map<int, std::string> strands, Matrix6D& M, std::unordered_map<std::string, Matrix2D> nussinov_matrices);
 

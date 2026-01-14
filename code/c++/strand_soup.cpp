@@ -122,6 +122,10 @@ class Matrix6D{
         if (j < 0 || j >= j_size + 2) {
             throw std::out_of_range("Index j is out of range");
         }
+        if (m < 0 || m >= m_size)
+            throw std::out_of_range("Index m is out of range");
+        if (c < 0 || c >= c_size)
+            throw std::out_of_range("Index c is out of range");
         return data[m][s-1][i][r-1][j][c]; // 1-based indexing for strands and bases
     }
 
@@ -565,8 +569,8 @@ float Ms1Minimization (int s, int i, int j,
  * @return float The minimum energy.
  */
 
-float MultipleCaseMinimization(int m, int s, int i, int r, int j,
-    const std::unordered_map<int, std::string> strands,
+ float MultipleCaseMinimization(int m, int s, int i, int r, int j,
+    const std::unordered_map<int, std::string>& strands,
     Matrix5D& C, Matrix5D& M1_multi, Matrix5D& M, Matrix6D& F,
     RNAEnergyEvaluator& evaluator, vrna_param_t *params)
 {

@@ -25,6 +25,10 @@ extern const int theta;
  */
 extern const float pair_energy;
 
+extern const float const_a;
+extern const float const_b;
+extern const float const_c;
+
 
 /**
  * @brief Energy value representing infinity.

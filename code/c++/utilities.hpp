@@ -16,6 +16,9 @@
 #define UTILITIES_HPP
 
 #include "global_variables.hpp"
+#include <unordered_map>
+#include <string>
+
 
 /**
  * @class Matrix2D

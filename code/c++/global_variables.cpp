@@ -9,7 +9,12 @@
 
 #include "global_variables.hpp"
 
-const int theta = 1; // Usually set to 3
+const int theta = 3; // Usually set to 3
+
+const float const_a{};
+const float const_b{};
+const float const_c{};
+
 
 const float pair_energy = -1; // Can be changed to a dictionary pair/energy. + define a function to extract the energy of a specific pair.
 

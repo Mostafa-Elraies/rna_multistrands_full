@@ -1,8 +1,26 @@
+# --- Environments ---
 INF551_env/
+.env/
+.venv/
+
+# --- Build artifacts ---
 code/c++/*.exe
+code/c++/*.o
+code/c++/*.out
+code/c++/*.dSYM/
+
+# --- Optional build directory ---
 code/c++/build/*
-!/code/c++/build/
-!/code/c++/build/Makefile
-*DS_Store
-*__pycache__/
-strand_soup.exe.dSYM/
+!code/c++/build/
+!code/c++/build/Makefile
+
+# --- OS junk ---
+.DS_Store
+
+# --- Python junk ---
+**/__pycache__/
+*.pyc
+
+# --- Editors ---
+.vscode/
+.idea/

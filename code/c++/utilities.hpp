@@ -2,14 +2,12 @@
  * @file utilities.hpp
  * @brief Utility functions and classes for RNA secondary structure prediction.
  * 
- * This file defines helper functions and a `Matrix2D` class used in the Nussinov algorithm 
  * for RNA folding. The matrix class allows for 1-based indexing, unlike the standard 
- * 0-based indexing in C++. This choice is motivated by the 1-based syntax used in the paper of the strand soup algorithm.
  * 
  * Dependencies:
  * - Requires `global_variables.hpp` for shared constants.
  * 
- * @date 2025-03
+ * @date 2026-02
  */
 
 #ifndef UTILITIES_HPP
@@ -133,6 +131,8 @@ void print_matrix(const Matrix2D& m, const std::string& sequence, int cellWidth 
  */
 void add_strand_if_unique(std::unordered_map<int, std::string>& strands, const std::string& strand);
 
+
+void seed_random(uint64_t seed);
 
 /**
  * @brief Generates a random RNA sequence of a given length.

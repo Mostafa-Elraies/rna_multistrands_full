@@ -5,7 +5,7 @@
  * This file contains global constants for RNA structure prediction, including
  * energy values and valid base pair combinations.
  *
- * @date 2025-03
+ * @date 2026-02
  */
 
 #ifndef GLOBAL_VARIABLES_HPP
@@ -18,16 +18,6 @@
  * @brief Minimum distance between paired bases. (0 = no constraint)
  */
 extern const int theta;
-
-
-/**
- * @brief Energy of a base pair.
- */
-extern const float pair_energy;
-
-extern const float const_a;
-extern const float const_b;
-extern const float const_c;
 
 
 /**

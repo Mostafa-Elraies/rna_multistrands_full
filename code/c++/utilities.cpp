@@ -8,7 +8,7 @@
  * - A function to generate random RNA sequences.
  * - Helper functions for printing matrices and displaying results in a formatted way.
  * 
- * These utilities are used in both nussinov and strand_soup
+ * These utilities are used in the strand_soup
  * 
  * 
  * COMPILATION of this file for testing:
@@ -26,7 +26,8 @@
  */
 
 #include "utilities.hpp"
-
+#include <random>
+#include <stdexcept>
 #include <iostream>
 #include <string>
 #include <utility>
@@ -277,13 +278,21 @@ void add_strand_if_unique(std::unordered_map<int, std::string>& strands, const s
  * 
  * @return std::string: The randomly generated RNA sequence.
  */
+static thread_local std::mt19937 rng;
+
+void seed_random(uint64_t seed) {
+    rng.seed(static_cast<uint32_t>(seed));
+}
+
 std::string generate_random_sequence(int length) {
-    const std::string nucleotides = "ACGU";
-    std::string sequence = "$"; //
-    for (int i = 0; i < length; ++i) {
-        sequence += nucleotides[rand() % 4];
-    }
-    return sequence;
+    if (length < 0) throw std::invalid_argument("length must be >= 0");
+    static const char bases[4] = {'A','U','C','G'};
+    std::uniform_int_distribution<int> dist(0, 3);
+
+    std::string s;
+    s.reserve((size_t)length);
+    for (int i = 0; i < length; ++i) s.push_back(bases[dist(rng)]);
+    return s;
 }
 
 

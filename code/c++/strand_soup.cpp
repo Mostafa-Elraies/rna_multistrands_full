@@ -1,6 +1,6 @@
 /**
  * @file strand_soup.cpp
- * @brief Implements the strand_soup algorithm for RNA secondary structure prediction.
+ * @brief Implements the turner enrgy model of the strand_soup algorithm for RNA secondary structure prediction.
  *
  * This file contains the implementation of the dynamic programming approach 
  * for RNA structure prediction, including the matrix filling and the backtracking.
@@ -9,20 +9,22 @@
  * 
  * COMPILATION of this file for testing:
  * Go to the strand_soup.ccp directory where the Makefile should also be and run the following command in the terminal:
- *     make strand_soup
- * Execution:
+ *      make clean
+ *      make strand_soup
+ *      
+ * 
  * After compilation, run the program with:
- *     ./strand_soup.exe
+ *      ./strand_soup.exe
  *
  * Dependencies:
  * "global_variables.hpp" for global variables.
- * "nussinov.hpp" for the Nussinov algorithm.
+ * "RNAEnergyEvaluator.hpp" for the single strand folding and extracting energy parameters from Vienna RNA package.
  * "utilities.hpp" for helper functions.
  * 
  * The linking is done by the Makefile
  *
  * 
- * @date 2025-03
+ * @date 2026-02
  */
 
 
@@ -35,11 +37,16 @@
 #include <limits>
 #include <chrono> 
 #include <iomanip> 
-
+#include <sstream>
+#include <cmath>
+#include <algorithm>
+#include <unordered_set>
 #include "RNAEnergyEvaluator.hpp"
-#include "nussinov.hpp"
 #include "utilities.hpp"
 
+extern "C" {
+    #include <ViennaRNA/loop_energies.h>
+  }
 // just for the colors in the terminal
 #define RESET   "\033[0m"
 #define RED     "\033[31m"
@@ -56,7 +63,7 @@
  * @brief A class representing a 6D matrix used in the strand soup algorithm.
  * 
  * This class handles a 6-dimensional matrix with specific sizes for each dimension.
- * The matrix corresponds to the energy matrix used in the RNA folding calculations.
+ * The matrix corresponds to the full energy matrix (free) used in the RNA folding calculations.
  * It provides methods for accessing and modifying the matrix elements.
  * There are 6 dimensions:
  * - m: Number of dimensions needed in total for m. If we start with m_start strands, we need m = m_start-1 dimensions (easy to see with m_start = 2. once s and r are selected we only have the case m=0,so this dim is of size 2-1 = 1
@@ -71,6 +78,7 @@ extern "C" {
     #include <ViennaRNA/utils.h>
     #include <ViennaRNA/model.h>
 }
+
 
 
 class Matrix6D{
@@ -109,25 +117,50 @@ class Matrix6D{
      * 
      * Throws an out_of_range exception if indices are out of bounds.
      */
-    float& operator()(int m, int s, int i, int r, int j, int c) {
-        if (s <= 0 || s > s_size) {
-            throw std::out_of_range("Index s is out of range");
-        }
-        if (r <= 0 || r > r_size) {
-            throw std::out_of_range("Index r is out of range");
-        }
-        if (i < 0 || i >= i_size + 2) {
-            throw std::out_of_range("Index i is out of range");
-        }
-        if (j < 0 || j >= j_size + 2) {
-            throw std::out_of_range("Index j is out of range");
-        }
-        if (m < 0 || m >= m_size)
-            throw std::out_of_range("Index m is out of range");
-        if (c < 0 || c >= c_size)
-            throw std::out_of_range("Index c is out of range");
-        return data[m][s-1][i][r-1][j][c]; // 1-based indexing for strands and bases
+
+float& operator()(int m, int s, int i, int r, int j, int c) {
+    if (s <= 0 || s > s_size) {
+        std::ostringstream oss;
+        oss << "Index s out of range: s=" << s << " s_size=" << s_size;
+        throw std::out_of_range(oss.str());
     }
+    if (r <= 0 || r > r_size) {
+        std::ostringstream oss;
+        oss << "Index r out of range: r=" << r << " r_size=" << r_size;
+        throw std::out_of_range(oss.str());
+    }
+    if (i < 0 || i >= i_size + 2) {
+        std::ostringstream oss;
+        oss << "Index i out of range: i=" << i
+            << " allowed=[0.." << (i_size + 1) << "]"
+            << " (i_size=" << i_size << ")"
+            << " at F(m=" << m << ", s=" << s << ", i=" << i
+            << ", r=" << r << ", j=" << j << ", c=" << c << ")";
+        throw std::out_of_range(oss.str());
+    }
+    if (j < 0 || j >= j_size + 2) {
+        std::ostringstream oss;
+        oss << "Index j out of range: j=" << j
+            << " allowed=[0.." << (j_size + 1) << "]"
+            << " (j_size=" << j_size << ")"
+            << " at F(m=" << m << ", s=" << s << ", i=" << i
+            << ", r=" << r << ", j=" << j << ", c=" << c << ")";
+        throw std::out_of_range(oss.str());
+    }
+    if (m < 0 || m >= m_size) {
+        std::ostringstream oss;
+        oss << "Index m out of range: m=" << m << " m_size=" << m_size;
+        throw std::out_of_range(oss.str());
+    }
+    if (c < 0 || c >= c_size) {
+        std::ostringstream oss;
+        oss << "Index c out of range: c=" << c << " c_size=" << c_size;
+        throw std::out_of_range(oss.str());
+    }
+
+    return data[m][s-1][i][r-1][j][c];
+}
+
 
     int get_m_size() const { return m_size; }
     int get_s_size() const { return s_size; }
@@ -147,7 +180,7 @@ private:
  * @brief A class representing a 5D matrix used in the strand soup algorithm.
  * 
  * This class handles a 5-dimensional matrix with specific sizes for each dimension.
- * The matrix corresponds to the C and the M matrices used in the full model RNA prediction.
+ * The matrix corresponds to the C (close) and the M (multi) matrices used in the full model RNA prediction.
  * It provides methods for accessing and modifying the matrix elements.
  * There are 5 dimensions:
  * - m: Number of dimensions needed in total for m. If we start with m_start strands, we need m = m_start-1 dimensions (easy to see with m_start = 2. once s and r are selected we only have the case m=0,so this dim is of size 2-1 = 1
@@ -155,7 +188,6 @@ private:
  * - i: Max Nucleotide count in one of the strands (1-based)
  * - r: Strand type count (1-based)
  * - j: Max Nucleotide count in one of the strands (1-based)
- * 
  */
 class Matrix5D{
     public:
@@ -187,7 +219,6 @@ class Matrix5D{
      * @param i Index of the third dimension
      * @param r Index of the fourth dimension
      * @param j Index of the fifth dimension
-     * @param c Index of the sixth dimension
      * @return Reference to the element in the matrix
      * 
      * Throws an out_of_range exception if indices are out of bounds.
@@ -218,8 +249,6 @@ private:
     int m_size, s_size, i_size, r_size, j_size;
     std::vector<std::vector<std::vector<std::vector<std::vector<float>>>>> data;
 };
-
-
 
 
 
@@ -322,14 +351,10 @@ class output_backtrack{
 
 
 //======================================    Energy matrix functions    ==============================================//
-
-
-
-
 /**
- * @brief Handles the bubble case of the RNA strand soup problem.
+ * @brief Handles the free structure case 'F' with the allonce of disconnect of outermost fragments.
  * 
- * This function computes the minimum energy for a bubble case in the RNA strand soup problem. It considers the 4 cases and returns the minimum energy.
+ * This function computes the minimum energy for the bubble case in the RNA strand soup problem. It considers the 4 cases and returns the minimum energy.
  * 
  * @param m The number of strands remaining in the soup.
  * @param s The index of the starting strand. (1-based)
@@ -342,7 +367,6 @@ class output_backtrack{
  * @param M  An energy matrix for multiple loop structure.
  * @param F An energy matrix for free structure.
  * @param evaluator Energy evaluator with ViennaRNA functions.
- * @param params ViennaRNA thermodynamic parameter set.
  * @return float The minimum energy.
  */
 
@@ -351,14 +375,22 @@ class output_backtrack{
     Matrix5D& C, Matrix5D& M, Matrix6D& F,
     const RNAEnergyEvaluator& evaluator)
 {
+    if (s == r) return inf_energy;
     float min_value = inf_energy;
-    auto* params = evaluator.get_params(); // (not used here yet, but fine)
+    const int len_s = int(strands.at(s).size()) - 1;
+
+    if (i > len_s) return inf_energy;  // We mustn't do the general case when s is empty.
+    if (j < 1)     return inf_energy;  // We mustn't do the general case when r is empty.
+
 
     // --- Case 1 : i unpaired ---
     // Caller ensures i <= |s|-1 and j >= 1 in general case; borders handled outside.
-    min_value = F(m, s, i + 1, r, j, c);
-
-    // --- Case 2 : i pairs within strand s (i,k) ---
+    if (i + 1 <= len_s + 1)  // allow border 142, but not 143
+        min_value = F(m, s, i + 1, r, j, c);
+    else
+        min_value = inf_energy;
+    
+    // --- Case 2 : i pairs within strand the first strand 's' (i,k) ---
     for (int k = i + theta + 1; k <= int(strands.at(s).length()) - 1; ++k) {
         if (can_pair(strands.at(s)[i], strands.at(s)[k])) {
             float value = evaluator.get_C(s)[i][k] + F(m, s, k + 1, r, j, c);
@@ -369,12 +401,14 @@ class output_backtrack{
     // --- Case 3 : i pairs with new strand t at position k ---
     if (m >= 1) {
         for (int t = 1; t <= M.get_s_size(); ++t) {
+            if (t == s || t == r) continue;
             for (int m1 = 0; m1 < m; ++m1) {
                 int m2 = m - m1 - 1;
                 for (int k = 1; k <= int(strands.at(t).length()) - 1; ++k) {
                     if (can_pair(strands.at(s)[i], strands.at(t)[k])) {
-                        float value = C(m1, s, i, t, k) + F(m2, t, k + 1, r, j, c);
-                        if (value < min_value) min_value = value;
+                        float value = C(m1, s, i, t, k)
+                        + F(m2, t, k + 1, r, j, c);
+                                    if (value < min_value) min_value = value;
                     }
                 }
             }
@@ -382,10 +416,9 @@ class output_backtrack{
     }
 
     // --- Case 4 : i pairs with the last strand r at k (only if connected) ---
-    if (c == 1) {
+    if (c == 1) {  //to ensure this runs only if they were already connected. 
         for (int k = 1; k <= j; ++k) {
             if (!can_pair(strands.at(s)[i], strands.at(r)[k])) continue;
-
             if (k == int(strands.at(r).length()) - 1) {
                 float value = C(m, s, i, r, k);
                 if (value < min_value) min_value = value;
@@ -399,71 +432,10 @@ class output_backtrack{
     return min_value;
 }
 
-
-float M1Minimization (int m, int s, int i, int r, int j, 
-    const std::unordered_map<int, std::string>& strands, 
-    Matrix5D& C, Matrix5D& M1_multi, 
-    vrna_param_t *params, const RNAEnergyEvaluator& evaluator) 
-{
-    float min_value = inf_energy;
-
-    // --- Case 1: extend unpaired ---
-    if (i < int(strands.at(s).length()) - 1) {
-        float cand = M1_multi(m, s, i + 1, r, j) + params->MLbase;   
-        if (cand < min_value) min_value = cand;
-    }
-
-    // --- Case 2: helix at (i, j) ---
-    vrna_md_t md;
-    vrna_md_set_default(&md);
-
-    // Use encoded S1 maps for ptype (cross-strand allowed: use each strand's S1)
-    // NOTE: M1_multi here is cross-strand variant, so we don't have evaluator S1 for 'r' directly.
-    // If you keep only evaluator's S1 for single strands, you can't get S1[r] here.
-    // Minimal fix: get pair type using characters via helper (fallback):
-    // Better: pass S1 maps for both strands; but for now, compute via evaluator helper if available.
-    // If you stored S1 for all strands in evaluator, do:
-    const auto& S1s = evaluator.get_S1_map();
-    int type = vrna_get_ptype_md(S1s.at(s)[i], S1s.at(r)[j], &params->model_details);
-
-    float cand2 = C(m, s, i, r, j) + params->MLintern[type];
-    if (cand2 < min_value) min_value = cand2;
-
-    return min_value;
-}
-
-
-float Ms1Minimization (int s, int i, int j,
-    const std::unordered_map<int, std::string>& strands,
-    RNAEnergyEvaluator& evaluator, vrna_param_t *params)
-{
-    float min_value = inf_energy;
-
-    if (i >= j) return inf_energy;
-
-    // extend unpaired
-    if (i < int(strands.at(s).length()) - 1) {
-        float cand = evaluator.get_M1(s)[i + 1][j] + params->MLbase;
-        if (cand < min_value) min_value = cand;
-    }
-
-    // helix at (i,j)
-    vrna_md_t md;
-    vrna_md_set_default(&md);
-    const auto& S1s = evaluator.get_S1_map();
-    int type = vrna_get_ptype_md(S1s.at(s)[i], S1s.at(s)[j], &params->model_details);
-
-    float cand2 = evaluator.get_C(s)[i][j] + params->MLintern[type];
-    if (cand2 < min_value) min_value = cand2;
-
-    return min_value;
-}
-
-
 /**
- * @brief Handles the closed structure case of the RNA strand soup problem.
+ *  @brief Computes the 5D matrix for the M1_multi loop. 
  * 
- * This function computes the minimum energy for a bubble case in the RNA strand soup problem. It considers the 4 cases and returns the minimum energy.
+ * This function computes the minimum energy for the first multi loop in the RNA strand soup problem. It considers the 2 cases and returns the minimum energy. 
  * 
  * @param m The number of strands remaining in the soup.
  * @param s The index of the starting strand. (1-based)
@@ -471,9 +443,57 @@ float Ms1Minimization (int s, int i, int j,
  * @param r The index of the ending strand. (1-based)
  * @param j The index of the ending nucleotide in strand r. (1-based)
  * @param strands A dictionary of strands (index, sequence).
+ * @param C An energy matrix for closed structure.
+ * @param M1_multi  An energy matrix for first multi loop used to decompose mulitple loops with M.
+ * @param evaluator Energy evaluator with ViennaRNA functions.
+ * @param params Parameters from Vienna RNA.
+
+ */
+
+
+void M1MultiMatrixMinimization(int m, int s, int i, int r, int j,
+    const std::unordered_map<int, std::string>& strands,
+    Matrix5D& C, Matrix5D& M1_multi,
+    RNAEnergyEvaluator& evaluator,
+    vrna_param_t* params)
+{
+    if (i == int(strands.at(s).length()) || j == 0) {
+        M1_multi(m,s,i,r,j) = inf_energy;
+        return;
+    }
+
+    float best = inf_energy;
+
+    // Case 1: extend unpaired on left boundary 
+    if (i < int(strands.at(s).length()) - 1) {
+        best = std::min(best, M1_multi(m,s,i+1,r,j) + params->MLbase);
+    }
+
+    // Case 2: start with a helix at (i,j)
+    const auto& S1s = evaluator.get_S1_map();
+    int type = vrna_get_ptype_md(S1s.at(s)[i], S1s.at(r)[j], &params->model_details);
+    best = std::min(best, C(m,s,i,r,j) + params->MLintern[type]);
+
+    M1_multi(m,s,i,r,j) = best;
+}
+
+/**
+ * @brief Computes the 5D matrix for the  closed structure case of the RNA strand soup problem.
+ * 
+ * This function computes the minimum energy for a bubble case in the RNA strand soup problem. It considers the 5 cases and returns the minimum energy.
+ * 
+ * @param m The number of strands remaining in the soup.
+ * @param s The index of the starting strand. (1-based)
+ * @param i The index of the starting nucleotide in strand s. (1-based)
+ * @param r The index of the ending strand. (1-based)
+ * @param j The index of the ending nucleotide in strand r. (1-based)
+ * @param strands A dictionary of strands (index, sequence).
+ * @param C An energy matrix for closed structure.
+ * @param M1_multi  An energy matrix for first multi loop used to decompose mulitple loops with M.
  * @param F The energy matrix.
- * @param nussinov_matrices A dictionary of Nussinov matrices.
- * @return float The minimum energy.
+ * @param M The multi loop case  matrix.
+ * @param evaluator Energy evaluator with ViennaRNA functions.
+ * @param params Parameters from Vienna RNA.
  */
 
 
@@ -482,8 +502,19 @@ float Ms1Minimization (int s, int i, int j,
     Matrix5D& C, Matrix5D& M1_multi, Matrix6D& F, Matrix5D& M,
     RNAEnergyEvaluator& evaluator, vrna_param_t* params)
 {
+    const int len_s = int(strands.at(s).size()) - 1;
+    const int len_r = int(strands.at(r).size()) - 1;
+
+    if (i < 1 || i > len_s || j < 1 || j > len_r) {
+    C(m,s,i,r,j) = inf_energy;
+    return;
+    }
+
+    if (s == r) {
+        C(m, s, i, r, j) = inf_energy;
+        return;
+    }
     float min_value = inf_energy;
-    const auto& S1s = evaluator.get_S1_map();
 
     // --- Case 1 : interior loop (i,j) closed by (k,l) ---
     // Require i < k and l < j to form a proper interior loop.
@@ -491,7 +522,7 @@ float Ms1Minimization (int s, int i, int j,
         for (int l = 1; l <= j - 1; ++l) {
             if (k <= i || l >= j) continue;
             if (!can_pair(strands.at(s)[k], strands.at(r)[l])) continue;
-            float loop_energy = evaluator.interior_loop_energy(i, j, k, l, s);
+            float loop_energy = evaluator.interior_loop_energy_cross(s, i, r, j, k, l);
             float value = C(m, s, k, r, l) + loop_energy;
             if (value < min_value) min_value = value;
         }
@@ -506,120 +537,161 @@ float Ms1Minimization (int s, int i, int j,
     }
 
     // --- Case 3 : leftmost stem with new strand t ---
-    if (m >= 1) {
-        for (int t = 1; t <= F.get_s_size(); ++t) {
-            for (int m1 = 0; m1 < m; ++m1) {
-                int m2 = m - m1 - 1;
-                for (int k = 1; k <= int(strands.at(t).length()) - 1; ++k) {
-                    if (!can_pair(strands.at(s)[i + 1], strands.at(t)[k])) continue;
+if (m >= 1 && i + 1 <= len_s && j >= 2) { // j>=2 so j-1>=1
+    for (int t = 1; t <= F.get_s_size(); ++t) {
+        if (t == s || t == r) continue;
 
-                    int type = vrna_get_ptype_md(S1s.at(s)[i + 1], S1s.at(t)[k], &params->model_details);
+        for (int m1 = 0; m1 < m; ++m1) {
+            int m2 = m - m1 - 1;
+            for (int k = 1; k <= int(strands.at(t).length()) - 1; ++k) {
 
-                    float value = params->MLclosing
-                                + M1Minimization(m1, s, i + 1, t, k, strands, C, M1_multi, params, evaluator)
-                                + params->MLintern[type]
-                                + M(m2, t, k + 1, r, j - 1);
-                    if (value < min_value) min_value = value;
-                }
+                if (!can_pair(strands.at(s)[i + 1], strands.at(t)[k])) continue;
+
+                float value = params->MLclosing
+                            + M1_multi(m1, s, i + 1, t, k)
+                            + M(m2, t, k + 1, r, j - 1);
+
+                if (value < min_value) min_value = value;
             }
         }
     }
+}
+
 
     // --- Case 4 : leftmost stem with rightmost strand r at k ---
     for (int k = 1; k <= j - 1; ++k) {
         if (!can_pair(strands.at(s)[i + 1], strands.at(r)[k])) continue;
 
-        int type = vrna_get_ptype_md(S1s.at(s)[i + 1], S1s.at(r)[k], &params->model_details);
 
         if (k == int(strands.at(r).length()) - 1) {
             float value = params->MLclosing
-                        + M1Minimization(m, s, i + 1, r, k, strands, C, M1_multi, params, evaluator)
-                        + params->MLintern[type];
+                        + M1_multi(m, s, i + 1, r, k);
             if (value < min_value) min_value = value;
         } else {
             float value = params->MLclosing
-                        + M1Minimization(m, s, i + 1, r, k, strands, C, M1_multi, params, evaluator)
-                        + params->MLintern[type]
-                        + evaluator.get_M1(r)[k + 1][j - 1];
+                        + M1_multi(m, s, i + 1, r, k)
+                        + evaluator.get_M(r)[k + 1][j - 1];
             if (value < min_value) min_value = value;
         }
     }
 
-    // --- Case 5: disconnect (external) ---
-    if (F(m, s, i + 1, r, j - 1, 0) < min_value) {
-        min_value = F(m, s, i + 1, r, j - 1, 0);
-    }
+// --- Case 5: disconnect (external) ---
+if (i + 1 <= F.get_i_size() + 1 && j - 1 >= 0) {
+    min_value = std::min(min_value, F(m, s, i + 1, r, j - 1, 0));
+}
+
 
     C(m, s, i, r, j) = min_value;
 }
 
 
 /**
- * @brief Handles the closed structure case of the RNA strand soup problem.
+ * @brief Handles the multi loop structure case of the RNA strand soup problem.
  * 
- * This function computes the minimum energy for a bubble case in the RNA strand soup problem. It considers the 4 cases and returns the minimum energy.
- * 
+ * This function computes the minimum energy for the multiple loop case in the RNA strand soup problem. 
+ * It considers the 4 cases and returns the minimum energy.
  * @param m The number of strands remaining in the soup.
  * @param s The index of the starting strand. (1-based)
  * @param i The index of the starting nucleotide in strand s. (1-based)
  * @param r The index of the ending strand. (1-based)
  * @param j The index of the ending nucleotide in strand r. (1-based)
  * @param strands A dictionary of strands (index, sequence).
- * @param nussinov_matrices A dictionary of Nussinov matrices.
+ * @param C An energy matrix for closed structure.
+ * @param M1_multi  An energy matrix for first multi loop used to decompose mulitple loops with M.
+ * @param M The multi loop case  matrix.
+ * @param F The full energy matrix.
+ * @param evaluator Energy evaluator with ViennaRNA functions.
+ * @param params Parameters from Vienna RNA. 
  * @return float The minimum energy.
  */
 
+
  float MultipleCaseMinimization(int m, int s, int i, int r, int j,
     const std::unordered_map<int, std::string>& strands,
-    Matrix5D& C, Matrix5D& M1_multi, Matrix5D& M, Matrix6D& F,
+    Matrix5D& C, Matrix5D& /*M1_multi*/, Matrix5D& M, Matrix6D& F,
     RNAEnergyEvaluator& evaluator, vrna_param_t *params)
 {
+    if (s == r) return inf_energy;
+
     float min_value = inf_energy;
-    const auto& S1s = evaluator.get_S1_map();
+
+    const auto& S1s  = evaluator.get_S1_map();
+    const int len_s  = int(strands.at(s).size()) - 1;
+    const int len_r  = int(strands.at(r).size()) - 1;
 
     // --- Case 1 : i unpaired ---
-    min_value = M(m, s, i + 1, r, j) + params->MLbase;
+    if (i + 1 <= len_s) {
+        min_value = std::min(
+            min_value,
+            M(m, s, i + 1, r, j) + params->MLbase
+        );
+    }
 
     // --- Case 2 : i pairs within s ---
-    for (int k = i + theta + 1; k <= int(strands.at(s).length()) - 1; ++k) {
+    for (int k = i + theta + 1; k <= len_s; ++k) {
         if (!can_pair(strands.at(s)[i], strands.at(s)[k])) continue;
 
-        int type = vrna_get_ptype_md(S1s.at(s)[i], S1s.at(s)[k], &params->model_details);
-        float value = evaluator.get_C(s)[i][k] + params->MLintern[type] + M(m, s, k + 1, r, j);
-        if (value < min_value) min_value = value;
+        int type = vrna_get_ptype_md(
+            S1s.at(s)[i], S1s.at(s)[k], &params->model_details
+        );
+
+        min_value = std::min(
+            min_value,
+            evaluator.get_C(s)[i][k]
+            + params->MLintern[type]
+            + M(m, s, k + 1, r, j)
+        );
     }
 
     // --- Case 3 : i pairs with new strand t ---
     if (m >= 1) {
         for (int t = 1; t <= F.get_s_size(); ++t) {
+            const int len_t = int(strands.at(t).size()) - 1;
+            if (t == s || t == r) continue;
+
+
             for (int m1 = 0; m1 < m; ++m1) {
                 int m2 = m - m1 - 1;
-                for (int k = 1; k <= int(strands.at(t).length()) - 1; ++k) {
+
+                for (int k = 1; k <= len_t; ++k) {
                     if (!can_pair(strands.at(s)[i], strands.at(t)[k])) continue;
 
-                    int type = vrna_get_ptype_md(S1s.at(s)[i], S1s.at(t)[k], &params->model_details);
-                    float value = C(m1, s, i, t, k) + params->MLintern[type] + M(m2, t, k + 1, r, j);
-                    if (value < min_value) min_value = value;
+                    int type = vrna_get_ptype_md(
+                        S1s.at(s)[i], S1s.at(t)[k], &params->model_details
+                    );
+
+                    min_value = std::min(
+                        min_value,
+                        C(m1, s, i, t, k)
+                        + params->MLintern[type]
+                        + M(m2, t, k + 1, r, j)
+                    );
                 }
             }
         }
     }
 
     // --- Case 4 : i pairs with last strand r at k ---
-    for (int k = 1; k <= j - 1; ++k) {
+    int kmax = std::min(j - 1, len_r);
+    for (int k = 1; k <= kmax; ++k) {
         if (!can_pair(strands.at(s)[i], strands.at(r)[k])) continue;
 
-        int type = vrna_get_ptype_md(S1s.at(s)[i], S1s.at(r)[k], &params->model_details);
+        int type = vrna_get_ptype_md(
+            S1s.at(s)[i], S1s.at(r)[k], &params->model_details
+        );
 
-        if (k == int(strands.at(r).length()) - 1) {
-            float value = C(m, s, i, r, k) + params->MLintern[type];
-            if (value < min_value) min_value = value;
+        if (k == j - 1) {
+            min_value = std::min(
+                min_value,
+                C(m, s, i, r, k) + params->MLintern[type]
+            );
         } else {
-            float value = params->MLclosing
-                        + M1Minimization(m, s, i + 1, r, k, strands, C, M1_multi, params, evaluator)
-                        + params->MLintern[type]
-                        + evaluator.get_M1(r)[k + 1][j];
-            if (value < min_value) min_value = value;
+            min_value = std::min(
+                min_value,
+                C(m, s, i, r, k)
+                + params->MLintern[type]
+                + evaluator.get_M(r)[k + 1][j]
+            );
         }
     }
 
@@ -627,16 +699,24 @@ float Ms1Minimization (int s, int i, int j,
 }
 
 
-/// @brief this is the case of multiloops
-/// @param m 
-/// @param s 
-/// @param i 
-/// @param r 
-/// @param j 
-/// @param strands 
-/// @param C 
-/// @param M 
-/// @param nussinov_matrices 
+
+/**
+ * @brief This is similar to the square case of the full energy matrix, where we check the border case and actually fill the 5D matrix.
+ * This function checks for j = 0 and i = |s|+1, if not it redirects to the 4 cases computed by the precedent function. 
+ * This function and similar 5 D functions will all be called withing the main auxilary matrix.
+ * @param m The number of strands remaining in the soup.
+ * @param s The index of the starting strand. (1-based)
+ * @param i The index of the starting nucleotide in strand s. (1-based)
+ * @param r The index of the ending strand. (1-based)
+ * @param j The index of the ending nucleotide in strand r. (1-based)
+ * @param strands A dictionary of strands (index, sequence).
+ * @param C An energy matrix for closed structure.
+ * @param M1_multi  An energy matrix for first multi loop used to decompose mulitple loops with M.
+ * @param M The multi loop case  matrix.
+ * @param F The full energy matrix.
+ * @param evaluator Energy evaluator with ViennaRNA functions.
+ * @param params Parameters from Vienna RNA. 
+ */
 
 void MMatrixMinimization(int m, int s, int i, int r, int j,
     const std::unordered_map<int, std::string>& strands,
@@ -654,11 +734,13 @@ void MMatrixMinimization(int m, int s, int i, int r, int j,
 
 
 /**
- * @brief Computes the 6D matrix for the RNA strand soup problem
+ * @brief Computes the 6D matrix for the RNA strand soup problem. This corresponds to the square case.
+ * Within it the C,M,M1 matrices are filled too before filling the F full energy matrix.
  * 
  * @param strands The dictionary of strands (index, sequence).
  * @param C The closed matrix.
  * @param M The multiloop matrix.
+ * @param M1_multi  An energy matrix for first multi loop used to decompose mulitple loops with M.
  * @param F The full matrix (6D).
  * @param evaluator Energy evaluator with ViennaRNA functions.
  * @param params ViennaRNA thermodynamic parameter set.
@@ -667,38 +749,68 @@ void MainAuxiliaryMatrix(std::unordered_map<int, std::string> strands,
     Matrix5D& C, Matrix5D& M,Matrix5D& M1_multi, Matrix6D& F,
     RNAEnergyEvaluator& evaluator,
     vrna_param_t* params) {
+        
+        std::cerr << "DEBUG: F.get_i_size()=" << F.get_i_size()
+        << " F.get_j_size()=" << F.get_j_size()
+        << " i allowed [0.." << (F.get_i_size()+1) << "]\n";
+       
 
     for (int m = 0; m < F.get_m_size(); m++) {
         for (int s = 1; s <= F.get_s_size(); s++) {
-            for (int i = F.get_i_size() + 1; i >= 0; i--) {
-                for (int r = 1; r <= F.get_r_size(); r++) {
-                    for (int j = 0; j <= F.get_j_size() + 1; j++) {
+            for (int i = F.get_i_size() +1 ; i >= 0; --i) {
+                static auto t_last = std::chrono::steady_clock::now();
 
-                          // ---- NEW: only compute C and M when both strands are non-empty ----
-                          bool s_nonempty = (i >= 1 && i <= int(strands.at(s).length()) - 1);
-                          bool r_nonempty = (j >= 1 && j <= int(strands.at(r).length()) - 1);
-                      
-                          if (s_nonempty && r_nonempty) {
-                              ClosedCaseMinimization(
-                                  m, s, i, r, j,
-                                  strands,
-                                  C, M1_multi, F, M,
-                                  evaluator, params
-                              );
-                              MMatrixMinimization(
-                                  m, s, i, r, j,
-                                  strands,
-                                  C, M1_multi, M, F,
-                                  evaluator, params
-                              );
+                if (m == 0 && s == 1) {
+                    if (i % 5 == 0) { // every 5 rows it prints the time to make sure the code is running for long sequences. 
+                        auto now = std::chrono::steady_clock::now();
+                        auto dt = std::chrono::duration_cast<std::chrono::seconds>(now - t_last).count();
+                        t_last = now;
+                
+                        std::cerr << "PROGRESS m=" << m
+                                  << " s=" << s
+                                  << " i=" << i << "/" << (F.get_i_size()+1)
+                                  << "  dt=" << dt << "s"
+                                  << std::endl;
+                    }
+                }
+                
+                  
+                for (int r = 1; r <= F.get_r_size(); r++) {
+                    const int len_s = int(strands.at(s).size()) - 1;
+                     const int len_r = int(strands.at(r).size()) - 1;
+                    if (r == s) {
+                        // I set everything to INF so nothing reads garbage values, as we are looking for minimim values anyways.
+                        for (int j = 0; j <= F.get_j_size() + 1; j++) {
+                            C(m, s, i, r, j) = inf_energy;
+                            M(m, s, i, r, j) = inf_energy;
+                            M1_multi(m,s,i,r,j) = inf_energy;  
+                            F(m, s, i, r, j, 0) = inf_energy;
+                            F(m, s, i, r, j, 1) = inf_energy;
+                        }
+                        continue;
+                    }
+                
+                    for (int j = 0; j <= F.get_j_size() +1; ++j) {
+
+                          
+                          
+                          bool s_ok_for_closed = (i >= 1 && i + 1 <= len_s);
+                          bool r_ok_for_closed = (j >= 1 && j - 1 >= 0 && j <= len_r);
+                          
+                          if (s_ok_for_closed && r_ok_for_closed) {
+                              M1MultiMatrixMinimization(m,s,i,r,j,strands,C,M1_multi,evaluator,params);
+                              ClosedCaseMinimization(m,s,i,r,j,strands,C,M1_multi,F,M,evaluator,params);
+                              MMatrixMinimization(m,s,i,r,j,strands,C,M1_multi,M,F,evaluator,params);
                           } else {
-                              C(m, s, i, r, j) = inf_energy;
-                              M(m, s, i, r, j) = inf_energy;
+                              C(m,s,i,r,j) = inf_energy;
+                              M(m,s,i,r,j) = inf_energy;
+                              M1_multi(m,s,i,r,j) = inf_energy;  
                           }
+                          
   
 
                         for (int c = 0; c <= 1; c++) {
-                            if (i > int(strands.at(s).length() - 1)) {
+                            if (i > len_s) {
                                 // === CASE: strand s is empty ===
                                 if (c == 1) {
                                     F(m, s, i, r, j, c) = inf_energy;
@@ -709,13 +821,15 @@ void MainAuxiliaryMatrix(std::unordered_map<int, std::string> strands,
                                             F(m, s, i, r, j, c) = 0;
                                             continue;
                                         } else {
-                                            F(m, s, i, r, j, c) = evaluator.get_M1(r)[1][j];
+                                            F(m, s, i, r, j, c) = evaluator.get_F(r)[1][j];
                                             continue;
                                         }
                                     } else {
                                         // Minimum over all t: M(m-1, t, 1, r, j, 1)
                                         float min_value = inf_energy;
                                         for (int t = 1; t <= M.get_s_size(); t++) {
+                                            if (t == s || t == r) continue;
+
                                             float val = F(m - 1, t, 1, r, j, 1);
                                             if (val < min_value) min_value = val;
                                         }
@@ -736,15 +850,17 @@ void MainAuxiliaryMatrix(std::unordered_map<int, std::string> strands,
                                                 continue;
                                             } else {
                                                 F(m, s, i, r, j, c) =
-                                                    evaluator.get_M1(s)[i][strands.at(s).length() - 1];
+                                                    evaluator.get_F(s)[i][strands.at(s).length() - 1];
                                                     continue;
                                             }
                                         } else {
                                             // Minimum over all t: M(m-1, s, i, t, |t|-1, 1)
                                             float min_value = inf_energy;
                                             for (int t = 1; t <= M.get_s_size(); t++) {
-                                                float val = F(m - 1, s, i, t,
-                                                    strands[t].length() - 1, 1);
+                                                int len_t = int(strands.at(t).size()) - 1;
+                                                if (t == s || t == r) continue;
+
+                                                    float val = F(m - 1, s, i, t, len_t, 1);
                                                 if (val < min_value) min_value = val;
                                             }
                                             F(m, s, i, r, j, c) = min_value;
@@ -752,7 +868,7 @@ void MainAuxiliaryMatrix(std::unordered_map<int, std::string> strands,
                                         }
                                     }
                                 } else {
-                                    // === GENERAL CASE ===
+                                    // === GENERAL CASE (bubble case) ===
                                     F(m, s, i, r, j, c) =
                                         GeneralCaseMinimization(m, s, i, r, j, c,
                                             strands, C, M, F, evaluator);
@@ -771,49 +887,57 @@ void MainAuxiliaryMatrix(std::unordered_map<int, std::string> strands,
 /**
  * @brief Finds all the starting point in the energy matrix, which corresponds to the minimum energy (excluding the border effect).
  * 
- * This function searches through the filled energy matrix (M) and identifies the minimum energy value. It returns all the coordinates (m,s,i,r,j,c) of the minimum energy, excluding the borders.
+ * This function searches through the filled energy matrix (F) and identifies the minimum energy value. It returns all the coordinates (m,s,i,r,j,c) of the minimum energy, excluding the borders.
  * 
- * @param M The 6D energy matrix that stores the computed energy values for all possible configurations.
+ * @param F The 6D energy matrix that stores the computed energy values for all possible configurations.
  * 
  * @return std::vector<std::vector<int>> A vector containing all the starting points (m,s,i,r,j,c) where the minimum energy is located.
  */
-std::vector<std::vector<int>> Find_all_start_backtrack(Matrix6D& F) {
+std::vector<std::vector<int>>
+Find_all_start_backtrack(Matrix6D& F, int n_strands, int c_target = 1) {
     std::vector<std::vector<int>> starting_points;
     float min_value = inf_energy;
 
-    // We assume final optimum is at m = F.get_m_size()-1, i = 1, j = max, c = 1
-    int m_last = F.get_m_size() - 1;
+    // For "use all strands": total strands used = m + 2  =>  m_required = n_strands - 2
+    int m_required = n_strands - 2;
+    if (m_required < 0 || m_required >= F.get_m_size()) {
+        throw std::runtime_error("Find_all_start_backtrack: invalid m_required for this F");
+    }
+
     int i_start = 1;
-    int j_max   = F.get_j_size();
+    int j_max   = F.get_j_size();  
 
     for (int s = 1; s <= F.get_s_size(); ++s) {
         for (int r = 1; r <= F.get_r_size(); ++r) {
-            float val = F(m_last, s, i_start, r, j_max, 1);
+            if (s == r) continue;
+
+            float val = F(m_required, s, i_start, r, j_max, c_target);
+            if (val == inf_energy) continue;
+
             if (val < min_value) {
                 min_value = val;
                 starting_points.clear();
-            }
-            if (val == min_value) {
-                starting_points.push_back({m_last, s, i_start, r, j_max, 1});
+                starting_points.push_back({m_required, s, i_start, r, j_max, c_target});
+            } else if (val == min_value) {
+                starting_points.push_back({m_required, s, i_start, r, j_max, c_target});
             }
         }
     }
 
     if (min_value == inf_energy) {
-        throw std::runtime_error(
-            "No valid starting point found by Find_all_start_backtrack in the given energy matrix"
-        );
+        throw std::runtime_error("No valid starting point found at required m (all strands) and c=1");
     }
+
     return starting_points;
 }
+
 
 /**
  * ============================================================
  *  Single-strand thermodynamic backtracking functions
  *  (Turner/Vienna model version)
  * ============================================================
- *  These replace the old Nussinov backtrack and reconstruct the
- *  optimal secondary structure of a single RNA using the
+ *  These reconstruct the optimal secondary structure of a single RNA using the
  *  thermodynamic matrices: F, C, M, and M1.
  *  Each function returns an output_backtrack object so that the
  *  same data structure can be merged into multistrand backtracking.
@@ -845,7 +969,7 @@ std::vector<std::vector<int>> Find_all_start_backtrack(Matrix6D& F) {
 
     // Case 2: i paired with k
     for (int k = i + theta + 1; k <= j; ++k) {
-        if (!can_pair(seq[i - 1], seq[k - 1])) continue;
+        if (!can_pair(seq[i ], seq[k])) continue;
 
         int cand = C[i][k];
         if (k + 1 <= j) cand += F[k + 1][j];
@@ -857,10 +981,11 @@ std::vector<std::vector<int>> Find_all_start_backtrack(Matrix6D& F) {
             return left;
         }
     }
-
+    std::cerr << "BT FAIL in backtrack_X: "
+    << " s="<<s<<" i="<<i<<" j="<<j
+    << " best="<<best << "\n";
     return out;
-}  // <--- only one closing brace here
-
+}  
  
  /*-------------------------------------------------------------
   *  C-matrix (closed pair region)
@@ -884,7 +1009,7 @@ std::vector<std::vector<int>> Find_all_start_backtrack(Matrix6D& F) {
      // --- Internal loops ---
      for (int p = i + 1; p < j - theta - 1; ++p) {
          for (int q = p + theta + 1; q < j; ++q) {
-             if (!can_pair(seq[p - 1], seq[q - 1])) continue;
+             if (!can_pair(seq[p], seq[q ])) continue;
              int e_int = evaluator.interior_loop_energy(i, j, p, q, s);
              if (best == C[p][q] + e_int) {
                  output_backtrack inner = backtrack_Cs(s, p, q, evaluator, theta);
@@ -896,59 +1021,84 @@ std::vector<std::vector<int>> Find_all_start_backtrack(Matrix6D& F) {
  
      // --- Multiloop closure ---
      for (int u = i + 1; u < j; ++u) {
-         if (best == M1[i + 1][u - 1] + M[u][j - 1] + params->MLclosing) {
-             output_backtrack left = backtrack_M1s(s, i + 1, u - 1, evaluator, theta);
-             output_backtrack right = backtrack_Ms(s, u, j - 1, evaluator, theta);
-             out.merge(left);
-             out.merge(right);
-             return out;
-         }
-     }
+        int left  = M1[i + 1][u];       // valid when i+1 <= u
+        int right = M[u + 1][j - 1];    // valid when u+1 <= j-1
+    
+        if (left >= inf_energy || right >= inf_energy) continue;
+    
+        int cand = left + right + params->MLclosing;
+    
+        if (best == cand) {
+            output_backtrack L = backtrack_M1s(s, i + 1, u, evaluator, theta);
+            output_backtrack R = backtrack_Ms(s, u + 1, j - 1, evaluator, theta);
+            out.merge(L);
+            out.merge(R);
+            return out;
+        }
+    }
+    
+    std::cerr << "BT FAIL in backtrack_X: "
+          << " s="<<s<<" i="<<i<<" j="<<j
+          << " best="<<best << "\n";
+
  
-     return out; // fallback
+     return out; 
  }
  
  /*-------------------------------------------------------------
   *  M-matrix (multiloop segment)
   *------------------------------------------------------------*/
- output_backtrack backtrack_Ms(int s, int i, int j, RNAEnergyEvaluator& evaluator, int theta) {
-     output_backtrack out;
-     const auto& M = evaluator.get_M(s);
-     const auto& C = evaluator.get_C(s);
-     const auto& S1 = evaluator.get_S1_map().at(s);
-     vrna_param_t* params = evaluator.get_params();
+ output_backtrack backtrack_Ms(int s, int i, int j,
+    RNAEnergyEvaluator& evaluator, int theta)
+{
+output_backtrack out;
+if (i > j) return out;
 
- 
-     int best = M[i][j];
- 
-     // Case 1: j unpaired
-     if (best == M[i][j - 1] + params->MLbase) {
-         return backtrack_Ms(s, i, j - 1, evaluator, theta);
-     }
- 
-     // Case 2: segmentation (M | C)
-     for (int u = i; u < j; ++u) {
-         int type = vrna_get_ptype_md(S1[u + 1], S1[j], &params->model_details);
-         int penalty = params->MLintern[type];
-         if (best == M[i][u] + C[u + 1][j] + penalty) {
-             output_backtrack left = backtrack_Ms(s, i, u, evaluator, theta);
-             output_backtrack right = backtrack_Cs(s, u + 1, j, evaluator, theta);
-             left.merge(right);
-             return left;
-         }
-     }
- 
-     // Case 3: start directly from a C
-     for (int u = i; u < j; ++u) {
-         int type = vrna_get_ptype_md(S1[u + 1], S1[j], &params->model_details);
-         int penalty = params->MLintern[type];
-         if (best == C[u + 1][j] + penalty) {
-             return backtrack_Cs(s, u + 1, j, evaluator, theta);
-         }
-     }
- 
-     return out;
- }
+const auto& M  = evaluator.get_M(s);
+const auto& C  = evaluator.get_C(s);
+const auto& S1 = evaluator.get_S1_map().at(s);
+vrna_param_t* params = evaluator.get_params();
+
+int best = M[i][j];
+
+
+// Case 1: i unpaired
+if (i + 1 <= j && best == M[i + 1][j] + params->MLbase) {
+return backtrack_Ms(s, i + 1, j, evaluator, theta);
+}
+
+// Case 2: split (C | M)
+for (int u = i; u < j; ++u) {
+if (C[i][u] >= inf_energy || M[u + 1][j] >= inf_energy) continue;
+
+int type = vrna_get_ptype_md(S1[i], S1[u], &params->model_details);
+int penalty = params->MLintern[type];
+
+if (best == C[i][u] + M[u + 1][j] + penalty) {
+output_backtrack left  = backtrack_Cs(s, i, u, evaluator, theta);
+output_backtrack right = backtrack_Ms(s, u + 1, j, evaluator, theta);
+left.merge(right);
+return left;
+}
+}
+
+// Case 3: start directly from C[i][u]
+for (int u = i; u <= j; ++u) {
+if (C[i][u] >= inf_energy) continue;
+
+int type = vrna_get_ptype_md(S1[i], S1[u], &params->model_details);
+int penalty = params->MLintern[type];
+
+if (best == C[i][u] + penalty) {
+return backtrack_Cs(s, i, u, evaluator, theta);
+}
+}
+std::cerr << "BT FAIL in backtrack_X: "
+          << " s="<<s<<" i="<<i<<" j="<<j
+          << " best="<<best << "\n";
+return out;
+}
+
  
  /*-------------------------------------------------------------
   *  M1-matrix (multiloop entry segment)
@@ -961,10 +1111,13 @@ std::vector<std::vector<int>> Find_all_start_backtrack(Matrix6D& F) {
      vrna_param_t* params = evaluator.get_params();
  
      int best = M1[i][j];
+     if (i > j) return out;
+        
+
  
-     // Case 1: j unpaired
-     if (best == M1[i][j - 1] + params->MLbase) {
-         return backtrack_M1s(s, i, j - 1, evaluator, theta);
+     // Case 1: i unpaired
+     if (i + 1 <= j && best == M1[i+1][j] + params->MLbase) {
+         return backtrack_M1s(s, i+1, j , evaluator, theta);
      }
  
      // Case 2: helix at (i,j)
@@ -975,7 +1128,9 @@ std::vector<std::vector<int>> Find_all_start_backtrack(Matrix6D& F) {
          out.merge(inner);
          return out;
      }
- 
+     std::cerr << "BT FAIL in backtrack_X: "
+          << " s="<<s<<" i="<<i<<" j="<<j
+          << " best="<<best << "\n";
      return out;}
 
 /**
@@ -983,14 +1138,18 @@ std::vector<std::vector<int>> Find_all_start_backtrack(Matrix6D& F) {
  
  * ============================================================
  */
-
- output_backtrack backtrack_F_multi(
+output_backtrack backtrack_F_multi_square(
     int m, int s, int i, int r, int j, int c,
     const std::unordered_map<int, std::string>& strands,
     Matrix5D& C, Matrix5D& M, Matrix5D& M1_multi, Matrix6D& F,
-    RNAEnergyEvaluator& evaluator,
-    vrna_param_t* params,
-    int theta
+    RNAEnergyEvaluator& evaluator, vrna_param_t* params, int theta
+);
+
+output_backtrack backtrack_F_multi_bubble(
+    int m, int s, int i, int r, int j, int c,
+    const std::unordered_map<int, std::string>& strands,
+    Matrix5D& C, Matrix5D& M, Matrix5D& M1_multi, Matrix6D& F,
+    RNAEnergyEvaluator& evaluator, vrna_param_t* params, int theta
 );
 
 output_backtrack backtrack_C_multi(
@@ -999,8 +1158,7 @@ output_backtrack backtrack_C_multi(
     Matrix5D& C, Matrix5D& M, Matrix5D& M1_multi, Matrix6D& F,
     RNAEnergyEvaluator& evaluator,
     vrna_param_t* params,
-    int theta
-);
+    int theta);
 
 output_backtrack backtrack_M_multi(
     int m, int s, int i, int r, int j,
@@ -1009,6 +1167,7 @@ output_backtrack backtrack_M_multi(
     RNAEnergyEvaluator& evaluator,
     vrna_param_t* params,
     int theta
+
 );
 
 output_backtrack backtrack_M1_multi(
@@ -1017,195 +1176,115 @@ output_backtrack backtrack_M1_multi(
     Matrix5D& C, Matrix5D& M, Matrix5D& M1_multi, Matrix6D& F,
     RNAEnergyEvaluator& evaluator,
     vrna_param_t* params,
-    int theta
-);
-output_backtrack backtrack_F_multi(
+    int theta);
+output_backtrack backtrack_F_multi_bubble(
     int m, int s, int i, int r, int j, int c,
     const std::unordered_map<int, std::string>& strands,
     Matrix5D& C, Matrix5D& M, Matrix5D& M1_multi, Matrix6D& F,
-    RNAEnergyEvaluator& evaluator,
-    vrna_param_t* params,
-    int theta
+    RNAEnergyEvaluator& evaluator, vrna_param_t* params, int theta
 ) {
     output_backtrack out;
 
-    const int len_s = int(strands.at(s).length()) - 1; // because of '$'
-    const int len_r = int(strands.at(r).length()) - 1;
+    const int len_s = int(strands.at(s).size()) - 1;
+    const int len_r = int(strands.at(r).size()) - 1;
 
     float best = F(m, s, i, r, j, c);
-
-    // Border sanity: if we ever end up at an impossible cell, just return empty.
     if (best >= inf_energy) return out;
-
-    bool s_nonempty = (i <= len_s);
-    bool r_nonempty = (j >= 1);
-
-    // ============================================================
-    // CASE A: s empty (i > len_s) → mirror DP "s empty" block
-    // ============================================================
-    if (!s_nonempty) {
-        if (c == 1) {
-            // F was set to +inf here; nothing to backtrack
-            return out;
-        } else {
-            if (m == 0) {
-                if (j == 0) {
-                    // F = 0; nothing to do
-                    return out;
-                } else {
-                    // F(m,s,i,r,j,c) = evaluator.get_F(r)[1][j]
-                    // => single-strand folding on strand r
-                    output_backtrack single = backtrack_M1s(r, 1, j, evaluator, theta);
-                    // pairs in 'single' use strand index 1;
-                    // they correspond to strand r, which will be added in full_backtrack.
-                    return single;
-                }
-            } else {
-                // min_t F(m-1, t, 1, r, j, 1)
-                for (int t = 1; t <= F.get_s_size(); ++t) {
-                    float cand = F(m - 1, t, 1, r, j, 1);
-                    if (cand == best) {
-                        output_backtrack sub =
-                            backtrack_F_multi(m - 1, t, 1, r, j, 1,
-                                              strands, C, M, M1_multi, F, evaluator, params, theta);
-                        // t is a new sequence in the middle block
-                        sub.add_sequence(t);
-                        sub.shift(1); // shift strand indices because in the final structure,
-                                      // there will be an extra leftmost starting strand
-                        return sub;
-                    }
-                }
-            }
-        }
-        std::cerr << "ERROR: backtrack_F_multi reached inconsistent 's empty' branch\n";
-        return out;
-    }
-
-    // ============================================================
-    // CASE B: r empty (j < 1) → mirror DP "r empty" block
-    // ============================================================
-    if (!r_nonempty) {
-        if (c == 1) {
-            return out;
-        } else {
-            if (m == 0) {
-                if (i == 0) {
-                    return out;
-                } else {
-                    // F = single-strand folding on s from i..len_s
-                    output_backtrack single = backtrack_M1s(s, i, len_s, evaluator, theta);
-
-                    return single;
-                }
-            } else {
-                // min_t F(m-1, s, i, t, |t|-1, 1)
-                for (int t = 1; t <= F.get_s_size(); ++t) {
-                    int len_t = int(strands.at(t).length()) - 1;
-                    float cand = F(m - 1, s, i, t, len_t, 1);
-                    if (cand == best) {
-                        output_backtrack sub =
-                            backtrack_F_multi(m - 1, s, i, t, len_t, 1,
-                                              strands, C, M, M1_multi, F, evaluator, params, theta);
-                        sub.add_sequence(t); // t appended on the right side of sequences
-                        return sub;
-                    }
-                }
-            }
-        }
-        std::cerr << "ERROR: backtrack_F_multi reached inconsistent 'r empty' branch\n";
-        return out;
-    }
-
-    // ============================================================
-    // CASE C: general case (both s and r non-empty)
-    // Mirror GeneralCaseMinimization
-    // ============================================================
 
     // --- Case 1 : i unpaired ---
     if (F(m, s, i + 1, r, j, c) == best) {
-        return backtrack_F_multi(m, s, i + 1, r, j, c,
-                                 strands, C, M, M1_multi, F, evaluator, params, theta);
+        return backtrack_F_multi_square(m, s, i + 1, r, j, c,
+                                        strands, C, M, M1_multi, F,
+                                        evaluator, params, theta);
     }
 
-    // --- Case 2 : i pairs within s (i,k), closed by single-strand C(s) ---
+    // --- Case 2 : i pairs within s (single strand C_s) ---
     {
         const std::string& seq_s = strands.at(s);
         for (int k = i + theta + 1; k <= len_s; ++k) {
-            if (!can_pair(seq_s[i], seq_s[k])) continue;  // i,k are 1-based and seq has '$' at 0
+            if (!can_pair(seq_s[i], seq_s[k])) continue;
+
             float cand = evaluator.get_C(s)[i][k] + F(m, s, k + 1, r, j, c);
             if (cand == best) {
-                // closed structure on single strand s between i..k
                 output_backtrack left = backtrack_Cs(s, i, k, evaluator, theta);
-                // rest from k+1.. on s,r
-                output_backtrack right = backtrack_F_multi(
-                    m, s, k + 1, r, j, c, strands, C, M, M1_multi, F, evaluator, params, theta);
+                output_backtrack right =
+                    backtrack_F_multi_square(m, s, k + 1, r, j, c,
+                                             strands, C, M, M1_multi, F,
+                                             evaluator, params, theta);
                 left.merge(right);
                 return left;
             }
         }
     }
 
-    // --- Case 3 : i pairs with new strand t at k (uses multi-strand C) ---
+    // --- Case 3 : i pairs with new strand t at position k (multi C) ---
     if (m >= 1) {
         const std::string& seq_s = strands.at(s);
-        for (int t = 1; t <= M.get_s_size(); ++t) {
+
+        for (int t = 1; t <= F.get_s_size(); ++t) {
+            if (t == s || t == r) continue; 
+
             const std::string& seq_t = strands.at(t);
-            int len_t = int(seq_t.length()) - 1;
+            int len_t = int(seq_t.size()) - 1;
+
             for (int m1 = 0; m1 < m; ++m1) {
                 int m2 = m - m1 - 1;
+
                 for (int k = 1; k <= len_t; ++k) {
                     if (!can_pair(seq_s[i], seq_t[k])) continue;
+
                     float cand = C(m1, s, i, t, k) + F(m2, t, k + 1, r, j, c);
                     if (cand == best) {
-                        // multi-strand closed region between i (s) and k (t)
                         output_backtrack left =
                             backtrack_C_multi(m1, s, i, t, k,
-                                              strands, C, M, M1_multi, F, evaluator, params, theta);
-                        // F on remainder starting from t,k+1
+                                              strands, C, M, M1_multi, F,
+                                              evaluator, params, theta);
+                    
+                      
+                        left.add_sequence(t);
+                    
                         output_backtrack right =
-                            backtrack_F_multi(m2, t, k + 1, r, j, c,
-                                              strands, C, M, M1_multi, F, evaluator, params, theta);
-
-                        // Strand index mapping (like old code):
-                        // s is strand 1; added 't' lies somewhere in the soup and will be
-                        // accounted for via list_of_sequences and shift logic.  
-                        // You may need to adjust shifts as you did in bubble_backtrack.
+                            backtrack_F_multi_square(m2, t, k + 1, r, j, c,
+                                                     strands, C, M, M1_multi, F,
+                                                     evaluator, params, theta);
+                    
+                        right.shift(1 + m1);
+                    
                         left.merge(right);
                         return left;
                     }
+                    
                 }
             }
         }
     }
 
-    // --- Case 4 : i pairs with r at k (multi-strand C(m,s,i,r,k))
+    // --- Case 4 : i pairs with r at k (multi C + single-strand tail) ---
     if (c == 1) {
         const std::string& seq_s = strands.at(s);
         const std::string& seq_r = strands.at(r);
+
+        
         for (int k = 1; k <= j; ++k) {
             if (!can_pair(seq_s[i], seq_r[k])) continue;
 
             if (k == len_r) {
                 float cand = C(m, s, i, r, k);
                 if (cand == best) {
-                    // closed region C(m,s,i,r,k)
-                    output_backtrack left =
-                        backtrack_C_multi(m, s, i, r, k,
-                                          strands, C, M, M1_multi, F, evaluator, params, theta);
-                    // no extra F on the right
-                    return left;
+                    return backtrack_C_multi(m, s, i, r, k,
+                                             strands, C, M, M1_multi, F,
+                                             evaluator, params, theta);
                 }
             } else {
                 float cand = C(m, s, i, r, k) + evaluator.get_F(r)[k + 1][j];
                 if (cand == best) {
                     output_backtrack left =
                         backtrack_C_multi(m, s, i, r, k,
-                                          strands, C, M, M1_multi, F, evaluator, params, theta);
+                                          strands, C, M, M1_multi, F,
+                                          evaluator, params, theta);
                     output_backtrack right =
                         backtrack_Fs(r, k + 1, j, evaluator, theta);
-                    // right has strand index 1; in multi-strand setting r is not 1.
-                    // You will likely want to shift right by (1 + m) as in original code.
-                    right.shift(1); // minimal consistent shift; tune if needed
+                    right.shift(1); 
                     left.merge(right);
                     return left;
                 }
@@ -1213,17 +1292,113 @@ output_backtrack backtrack_F_multi(
         }
     }
 
-    std::cerr << "ERROR: backtrack_F_multi could not match any GeneralCase branch\n";
-    return out;
+    std::cerr << "ERROR: backtrack_F_multi_bubble could not match any branch\n";
+    std::cerr << "BT FAIL in backtrack_X: "
+    << "m="<<m<<" s="<<s<<" i="<<i<<" r="<<r<<" j="<<j
+    << " best="<<best << "\n";
+    return output_backtrack();
 }
+output_backtrack backtrack_F_multi_square(
+    int m, int s, int i, int r, int j, int c,
+    const std::unordered_map<int, std::string>& strands,
+    Matrix5D& C, Matrix5D& M, Matrix5D& M1_multi, Matrix6D& F,
+    RNAEnergyEvaluator& evaluator, vrna_param_t* params, int theta
+) {
+    output_backtrack out;
+
+    const int len_s = int(strands.at(s).size()) - 1; // '$' at 0
+
+    float best = F(m, s, i, r, j, c);
+    if (best >= inf_energy) return out;
+
+    // =========================
+    // CASE: s empty (i > |s|)
+    // =========================
+    if (i > len_s) {
+        if (c == 1) {
+            return output_backtrack(); 
+        } else {
+            if (m == 0) {
+                // F = single-strand folding on r from 1..j
+                if (j <= 0) return output_backtrack();
+                return backtrack_Fs(r, 1, j, evaluator, theta);
+            } else {
+                // F(m,s,|s|+1,r,j,0) = min_t F(m-1,t,1,r,j,1)
+                for (int t = 1; t <= F.get_s_size(); ++t) {
+                    if (t == r) continue; 
+                    if (F(m, s, i, r, j, c) == F(m - 1, t, 1, r, j, 1)) {
+                        output_backtrack sub =
+                            backtrack_F_multi_square(m - 1, t, 1, r, j, 1,
+                                                     strands, C, M, M1_multi, F,
+                                                     evaluator, params, theta);
+                        sub.add_sequence(t);
+                        sub.shift(1); 
+                        return sub;
+                    }
+                }
+            }
+        }
+
+        std::cerr << "ERROR: backtrack_F_multi_square: s-empty branch no match\n";
+        std::cerr << "BT FAIL in backtrack_X: "
+        << "m="<<m<<" s="<<s<<" i="<<i<<" r="<<r<<" j="<<j
+        << " best="<<best << "\n";
+        return output_backtrack();
+    }
+
+    // =========================
+    // CASE: r empty (j < 1)
+    // =========================
+    if (j < 1) {
+        if (c == 1) {
+            return output_backtrack();
+        } else {
+            if (m == 0) {
+                // F = single-strand folding on s from i..|s|
+                if (i <= 0) return output_backtrack();
+                return backtrack_Fs(s, i, len_s, evaluator, theta);
+            } else {
+                // F(m,s,i,r,0,0) = min_t F(m-1,s,i,t,|t|,1)
+                for (int t = 1; t <= F.get_s_size(); ++t) {
+                    if (t == s) continue; 
+                    int len_t = int(strands.at(t).size()) - 1;
+                    if (F(m, s, i, r, j, c) == F(m - 1, s, i, t, len_t, 1)) {
+                        output_backtrack sub =
+                            backtrack_F_multi_square(m - 1, s, i, t, len_t, 1,
+                                                     strands, C, M, M1_multi, F,
+                                                     evaluator, params, theta);
+                        sub.add_sequence(t);
+                        return sub;
+                    }
+                }
+            }
+        }
+
+        std::cerr << "ERROR: backtrack_F_multi_square: r-empty branch no match\n";
+        std::cerr << "BT FAIL in backtrack_X: "
+        << "m="<<m<<" s="<<s<<" i="<<i<<" r="<<r<<" j="<<j
+        << " best="<<best << "\n";
+        return output_backtrack();
+    }
+
+    // =========================
+    // Otherwise general case
+    // =========================
+    return backtrack_F_multi_bubble(m, s, i, r, j, c,
+                                    strands, C, M, M1_multi, F,
+                                    evaluator, params, theta);
+}
+
+
+
 output_backtrack backtrack_C_multi(
     int m, int s, int i, int r, int j,
     const std::unordered_map<int, std::string>& strands,
     Matrix5D& C, Matrix5D& M, Matrix5D& M1_multi, Matrix6D& F,
     RNAEnergyEvaluator& evaluator,
     vrna_param_t* params,
-    int theta
-) {
+    int theta)
+ {
     output_backtrack out;
 
     float best = C(m, s, i, r, j);
@@ -1236,8 +1411,6 @@ output_backtrack backtrack_C_multi(
     int len_s = int(seq_s.length()) - 1;
     int len_r = int(seq_r.length()) - 1;
 
-    // First, record the closing pair (i,j) between s and r
-    // In the "abstract" strand indexing, s is strand 1, r is 1+m+1
     out.add_pair(1, i, 1 + m + 1, j);
 
     // --- Case 1 : interior loop, closed by (k,l) ---
@@ -1245,7 +1418,7 @@ output_backtrack backtrack_C_multi(
         for (int l = 1; l <= j - 1; ++l) {
             if (k <= i || l >= j) continue;
             if (!can_pair(seq_s[k], seq_r[l])) continue;
-            float loop_energy = evaluator.interior_loop_energy(i, j, k, l, s);
+            float loop_energy = evaluator.interior_loop_energy_cross(s, i, r, j, k, l);
             float cand = C(m, s, k, r, l) + loop_energy;
             if (cand == best) {
                 output_backtrack inner =
@@ -1278,6 +1451,7 @@ output_backtrack backtrack_C_multi(
     // --- Case 3 : leftmost stem with new strand t ---
     if (m >= 1) {
         for (int t = 1; t <= F.get_s_size(); ++t) {
+            if (t == s || t == r) continue; 
             const std::string& seq_t = strands.at(t);
             int len_t = int(seq_t.length()) - 1;
             for (int m1 = 0; m1 < m; ++m1) {
@@ -1285,28 +1459,32 @@ output_backtrack backtrack_C_multi(
                 for (int k = 1; k <= len_t; ++k) {
                     if (!can_pair(seq_s[i + 1], seq_t[k])) continue;
 
-                    int type = vrna_get_ptype_md(
-                        S1s.at(s)[i + 1], S1s.at(t)[k], &params->model_details);
 
                     float cand =
                         params->MLclosing
-                      + M1Minimization(m1, s, i + 1, t, k, strands, C, M1_multi, params, evaluator)
-                      + params->MLintern[type]
+                      + M1_multi(m1, s, i + 1, t, k)
                       + M(m2, t, k + 1, r, j - 1);
 
                       if (cand == best) {
                         output_backtrack left =
                             backtrack_M1_multi(m1, s, i + 1, t, k,
-                                               strands, C, M, M1_multi, F, evaluator, params, theta);
+                                               strands, C, M, M1_multi, F,
+                                               evaluator, params, theta);
+                    
+                        left.add_sequence(t);
+                    
                         output_backtrack right =
                             backtrack_M_multi(m2, t, k + 1, r, j - 1,
-                                              strands, C, M, M1_multi, F, evaluator, params, theta);
+                                              strands, C, M, M1_multi, F,
+                                              evaluator, params, theta);
                     
-                        // If you need shifts, apply them here before merging
+                        right.shift(1 + m1);
+                    
                         out.merge(left);
                         out.merge(right);
                         return out;
-                    }                    
+                    }
+                                   
                 }
             }
         }
@@ -1322,8 +1500,7 @@ output_backtrack backtrack_C_multi(
         if (k == len_r) {
             float cand =
                 params->MLclosing
-              + M1Minimization(m, s, i + 1, r, k, strands, C, M1_multi, params, evaluator)
-              + params->MLintern[type];
+              + M1_multi(m, s, i + 1, r, k);
             if (cand == best) {
                 output_backtrack left =
                     backtrack_M1_multi(m, s, i + 1, r, k,
@@ -1334,17 +1511,17 @@ output_backtrack backtrack_C_multi(
         } else {
             float cand =
                 params->MLclosing
-              + M1Minimization(m, s, i + 1, r, k, strands, C, M1_multi, params, evaluator)
+              + M1_multi(m, s, i + 1, r, k)
               + params->MLintern[type]
-              + evaluator.get_M1(r)[k + 1][j - 1];
+              + evaluator.get_M(r)[k + 1][j - 1];
 
             if (cand == best) {
                 output_backtrack left =
                     backtrack_M1_multi(m, s, i + 1, r, k,
                                        strands, C, M, M1_multi, F, evaluator, params, theta);
                 output_backtrack right =
-                    backtrack_M1s(r, k + 1, j - 1, evaluator, theta);
-                right.shift(1); // as usual, multi-strand index shift
+                    backtrack_Ms(r, k + 1, j - 1, evaluator, theta);
+                right.shift(1); 
                 out.merge(left);
                 out.merge(right);
                 return out;
@@ -1355,13 +1532,16 @@ output_backtrack backtrack_C_multi(
     // --- Case 5: external disconnect ---
     if (F(m, s, i + 1, r, j - 1, 0) == best) {
         output_backtrack inner =
-            backtrack_F_multi(m, s, i + 1, r, j - 1, 0,
+        backtrack_F_multi_square(m, s, i + 1, r, j - 1, 0,
                               strands, C, M, M1_multi, F, evaluator, params, theta);
         out.merge(inner);
         return out;
     }
 
     std::cerr << "ERROR: backtrack_C_multi could not match any ClosedCase branch\n";
+    std::cerr << "BT FAIL in backtrack_X: "
+    << "m="<<m<<" s="<<s<<" i="<<i<<" r="<<r<<" j="<<j
+    << " best="<<best << "\n";
     return out;
 }
 
@@ -1371,8 +1551,7 @@ output_backtrack backtrack_M_multi(
     Matrix5D& C, Matrix5D& M, Matrix5D& M1_multi, Matrix6D& F,
     RNAEnergyEvaluator& evaluator,
     vrna_param_t* params,
-    int theta
-) {
+    int theta) {
     output_backtrack out;
 
     float best = M(m, s, i, r, j);
@@ -1425,16 +1604,25 @@ output_backtrack backtrack_M_multi(
                     float cand = C(m1, s, i, t, k)
                                + params->MLintern[type]
                                + M(m2, t, k + 1, r, j);
-                    if (cand == best) {
-                        output_backtrack left =
-                            backtrack_C_multi(m1, s, i, t, k,
-                                              strands, C, M, M1_multi, F, evaluator, params, theta);
-                        output_backtrack right =
-                            backtrack_M_multi(m2, t, k + 1, r, j,
-                                              strands, C, M, M1_multi, F, evaluator, params, theta);
-                        left.merge(right);
-                        return left;
-                    }
+                               if (cand == best) {
+                                output_backtrack left =
+                                    backtrack_C_multi(m1, s, i, t, k,
+                                                      strands, C, M, M1_multi, F,
+                                                      evaluator, params, theta);
+                            
+                                left.add_sequence(t);
+                            
+                                output_backtrack right =
+                                    backtrack_M_multi(m2, t, k + 1, r, j,
+                                                      strands, C, M, M1_multi, F,
+                                                      evaluator, params, theta);
+                            
+                                right.shift(1 + m1);
+                            
+                                left.merge(right);
+                                return left;
+                            }
+                            
                 }
             }
         }
@@ -1457,17 +1645,15 @@ output_backtrack backtrack_M_multi(
             }
         } else {
             float cand =
-                params->MLclosing
-              + M1Minimization(m, s, i + 1, r, k, strands, C, M1_multi, params, evaluator)
-              + params->MLintern[type]
-              + evaluator.get_M1(r)[k + 1][j];
+            C(m, s, i, r, k) + params->MLintern[type]
+              + evaluator.get_M(r)[k + 1][j];
 
             if (cand == best) {
                 output_backtrack left =
-                    backtrack_M1_multi(m, s, i + 1, r, k,
+                    backtrack_C_multi(m, s, i , r, k,
                                        strands, C, M, M1_multi, F, evaluator, params, theta);
                 output_backtrack right =
-                    backtrack_M1s(r, k + 1, j, evaluator, theta);
+                    backtrack_Ms(r, k + 1, j, evaluator, theta);
                 right.shift(1);
                 left.merge(right);
                 return left;
@@ -1476,6 +1662,10 @@ output_backtrack backtrack_M_multi(
     }
 
     std::cerr << "ERROR: backtrack_M_multi could not match any MultipleCase branch\n";
+    std::cerr << "BT FAIL in backtrack_X: "
+          << "m="<<m<<" s="<<s<<" i="<<i<<" r="<<r<<" j="<<j
+          << " best="<<best << "\n";
+
     return out;
 }
 
@@ -1485,8 +1675,7 @@ output_backtrack backtrack_M1_multi(
     Matrix5D& C, Matrix5D& M, Matrix5D& M1_multi, Matrix6D& F,
     RNAEnergyEvaluator& evaluator,
     vrna_param_t* params,
-    int theta
-) {
+    int theta) {
     output_backtrack out;
 
     float best = M1_multi(m, s, i, r, j);
@@ -1519,6 +1708,9 @@ output_backtrack backtrack_M1_multi(
     }
 
     std::cerr << "ERROR: backtrack_M1_multi could not match any M1Minimization branch\n";
+    std::cerr << "BT FAIL in backtrack_X: "
+    << "m="<<m<<" s="<<s<<" i="<<i<<" r="<<r<<" j="<<j
+    << " best="<<best << "\n";
     return out;
 }
 
@@ -1531,42 +1723,74 @@ std::vector<output_backtrack> full_backtrack(
 ) {
     std::vector<output_backtrack> secondary_structures;
 
+    const int n_strands = (int)strands.size();
+
     std::vector<std::vector<int>> starting_points;
     try {
-        starting_points = Find_all_start_backtrack(F);
+        starting_points = Find_all_start_backtrack(F, n_strands, 1); /* c_target=1 for a connected structure*/
     } catch (const std::runtime_error& e) {
-        std::cerr << "Warning: " << e.what() << " Setting repartition to zero.\n";
-        return secondary_structures; // empty
+        std::cerr << "Warning: " << e.what() << "\n";
+        return secondary_structures;
     }
 
     for (auto& sp : starting_points) {
-        int m = sp[0];
-        int s = sp[1];
-        int i = sp[2];
-        int r = sp[3];
-        int j = sp[4];
-        int c = sp[5];
+        int m = sp[0], s = sp[1], i = sp[2], r = sp[3], j = sp[4], c = sp[5];
 
         std::cout << "Starting point: F("
                   << m << "," << s << "," << i << ","
                   << r << "," << j << "," << c << ") = "
-                  << F(m, s, i, r, j, c) << std::endl;
+                  << F(m, s, i, r, j, c) << "\n";
 
         output_backtrack secondary =
-            backtrack_F_multi(m, s, i, r, j, c,
-                              strands, C, M, M1_multi, F,
-                              evaluator, params, theta);
+            backtrack_F_multi_square(m, s, i, r, j, c,
+                                     strands, C, M, M1_multi, F,
+                                     evaluator, params, theta);
+        
+                                    
+                            
 
-        // As in old code: add r as last, s as first — your abstract sequence ordering
-        secondary.add_sequence(r);
-        secondary.add_sequence_front(s);
+
+        auto contains = [&](int x){
+            return std::find(secondary.list_of_sequences.begin(),
+                             secondary.list_of_sequences.end(), x)
+                   != secondary.list_of_sequences.end();
+        };
+
+        if (!contains(s)) secondary.add_sequence_front(s);
+        if (!contains(r)) secondary.add_sequence(r);
+        {
+            auto &v = secondary.list_of_sequences;
+            std::vector<int> outv;
+            outv.reserve(v.size());
+            std::unordered_set<int> seen;
+            seen.reserve(v.size());
+        
+            for (int x : v)
+                if (seen.insert(x).second) outv.push_back(x);
+        
+            v.swap(outv);
+        }
+      
+        float E_raw = F(m, s, i, r, j, c);
+
+        const int m_used = m + 2;   
+
+        float Kassoc = params->DuplexInit;
+        float E_assoc = (m_used > 1) ? (m_used - 1) * Kassoc : 0.0f;
+        float E_total = E_raw + E_assoc;
+
+        std::cout << "m_used=" << m_used
+                  << "  E_raw="   << (E_raw / 100.0f)   << " kcal/mol"
+                  << "  E_assoc=" << (E_assoc / 100.0f) << " kcal/mol"
+                  << "  E_total=" << (E_total / 100.0f) << " kcal/mol\n";
+
         secondary.print();
-
         secondary_structures.push_back(secondary);
     }
 
     return secondary_structures;
 }
+
 //======================================    Application on Triplet Repeats    ==============================================//
 
 
@@ -1580,7 +1804,7 @@ std::vector<output_backtrack> full_backtrack(
  * @param m_start 
  * 
  * STEP 1 : This function generates all possible triplet combinations.
- * STEP 2,3 : Then for each combination, it generates the corresponding RNA strands and computes the Nussinov matrices.
+ * STEP 2,3 : Then for each combination, it generates the corresponding RNA strands and computes the single strand folding.
  * STEP 4 : It then fills the 6D matrix of the strand_soup problem
  * STEP 5 : Finds all the strating points in the energy matrix and backtracks to find the secondary structures.
  * STEP 6 : Computes the repartition of pairs (internal/homogeneous/heterogeneous) in the secondary structures.
@@ -1689,7 +1913,7 @@ std::vector<output_backtrack> full_backtrack(
              vrna_param_t* params = evaluator.get_params();
  
              // STEP 4: Compute multi-strand matrices
-             int m_size = m_start - 1;                // as in old code
+             int m_size = m_start - 1;                
              int s_size = int(strands.size());        // number of distinct strand types
              int i_size = int(strand1.length()) - 1;  // real #bases without '$'
              int r_size = int(strands.size());
@@ -1718,11 +1942,8 @@ std::vector<output_backtrack> full_backtrack(
                      int strand_idx2 = pair[2];
  
                      if (strand_idx1 == strand_idx2) {
-                         // same strand index in the abstract ordering
                          internal++;
                      } else {
-                         // Using list_of_sequences as in old logic:
-                         // strand_idx are 1-based indices in list_of_sequences.
                          int seq_id1 = secondary_structure.list_of_sequences[strand_idx1 - 1];
                          int seq_id2 = secondary_structure.list_of_sequences[strand_idx2 - 1];
  
@@ -1753,14 +1974,12 @@ std::vector<output_backtrack> full_backtrack(
                  heterogeneous_file << "0";
              }
  
-             // Add a comma only if it's not the last column in this row
              if (triplet2 != triplets.back()) {
                  internal_file   << ",";
                  homogeneous_file << ",";
                  heterogeneous_file << ",";
              }
  
-             // Update progress
              current_combination++;
              float progress = (float(current_combination) / float(total_combinations)) * 100.0f;
  
@@ -1792,74 +2011,234 @@ std::vector<output_backtrack> full_backtrack(
                << ", " << homogeneous_filename
                << ", " << heterogeneous_filename << std::endl;
  }
-//=============================================================================================//
-int main() {
-    std::cout << "\n==================== Strand Soup ====================" << std::endl;
-    auto start_time = std::chrono::high_resolution_clock::now();
 
-    std::cout << "\n========== Setting the parameters ==========" << std::endl;
-    int m_start = 4;                // number of strands in total
-    int number_of_repeats = 10;     // triplet repeats per strand
-    int sequence_length = number_of_repeats * 3; // real #bases
-    std::cout << "  Number of strands : m = " << m_start << std::endl;
-    std::cout << "  Length of the sequences : " << sequence_length << std::endl;
-    std::cout << "  Theta : " << theta << std::endl;
-    std::cout << "\n========== Generation of the strands ==========" << std::endl;
+ //=================================================================//
+
+void run_homogeneous_soup(const std::string& triplet, int repeats, int m_start) {
+    const int seq_len = repeats * 3;
+
+    std::cout << "\n============================\n";
+    std::cout << "Homogeneous soup: (" << triplet << ")_" << repeats
+              << "   m_start=" << m_start
+              << "   length=" << seq_len << "\n";
+    std::cout << "============================\n";
+
+    // Build 7 distinct strands (even if sequences identical)
     std::unordered_map<int, std::string> strands;
-    strands[1] = with_dollar(generate_triplet_repeat("GUU", number_of_repeats));
-    strands[2] = with_dollar(generate_triplet_repeat("CAG", number_of_repeats));
-    strands[3] = with_dollar(generate_triplet_repeat("ACG", number_of_repeats));
-    std::cout << "Generated strands:" << std::endl;
-    for (const auto& p : strands) {
-        std::cout << "  Index " << p.first << " : " << p.second << std::endl;
-    }
+    std::string strand = generate_triplet_repeat(triplet, repeats);
+    for (int id = 1; id <= m_start; ++id)
+        strands[id] = strand;
 
-    std::cout << "\n========== Single-strand thermodynamic matrices ==========" << std::endl;
+        std::cerr << "DEBUG strand[1].size()=" << strands.at(1).size()
+        << " first2='" << strands.at(1).substr(0,2) << "'\n";
+
+    // Single-strand evaluator
+    auto t0 = std::chrono::high_resolution_clock::now();
     RNAEnergyEvaluator evaluator(strands);
     vrna_param_t* params = evaluator.get_params();
+    auto t1 = std::chrono::high_resolution_clock::now();
 
-    // If you want to print single-strand matrices for debugging:
-    // for (const auto& p : strands) {
-    //     int s = p.first;
-    //     const auto& F_s = evaluator.get_F(s);
-    //     const auto& C_s = evaluator.get_C(s);
-    //     const auto& M_s = evaluator.get_M(s);
-    //     const auto& M1_s = evaluator.get_M1(s);
-    //     // print them as you like
-    // }
-
-    std::cout << "========== MainAuxiliaryMatrix (multi-strand) ==========" << std::endl;
-    int m_size = m_start - 1;           // same logic as before
-    int s_size = int(strands.size());   // number of distinct strand types
-    int i_size = sequence_length;       // real #bases, indices 1..sequence_length
+    // Multi-strand matrices
+    int m_size = m_start - 1;
+    int s_size = int(strands.size());
+    int i_size = seq_len;
     int r_size = int(strands.size());
-    int j_size = sequence_length;
-    int c_size = 2;                     // connectivity bit
+    int j_size = seq_len;
+    int c_size = 2;
+
+    Matrix5D C(m_size, s_size, i_size, r_size, j_size);
+    Matrix5D M(m_size, s_size, i_size, r_size, j_size);
+    Matrix5D M1_multi(m_size, s_size, i_size, r_size, j_size);
+    Matrix6D F(m_size, s_size, i_size, r_size, j_size, c_size);
+    auto t2 = std::chrono::high_resolution_clock::now();
+    try {
+        MainAuxiliaryMatrix(strands, C, M, M1_multi, F, evaluator, params);
+    } catch (const std::out_of_range& e) {
+        std::cerr << "\nOUT_OF_RANGE during MainAuxiliaryMatrix: " << e.what() << "\n";
+        throw;
+    }
+    auto t3 = std::chrono::high_resolution_clock::now();
+    
+
+    // Backtrack
+    auto t4 = std::chrono::high_resolution_clock::now();
+    std::vector<output_backtrack> structures =
+        full_backtrack(strands, C, M, M1_multi, F, evaluator, params, theta);
+    auto t5 = std::chrono::high_resolution_clock::now();
+
+    // Report timings
+    std::chrono::duration<double> dt_eval = t1 - t0;
+    std::chrono::duration<double> dt_alloc = t2 - t1;
+    std::chrono::duration<double> dt_dp   = t3 - t2;
+    std::chrono::duration<double> dt_bt   = t5 - t4;
+
+    std::cout << "\nTimings:\n";
+    std::cout << "  evaluator (single strand): " << dt_eval.count() << " s\n";
+    std::cout << "  matrix alloc:              " << dt_alloc.count() << " s\n";
+    std::cout << "  MainAuxiliaryMatrix DP:    " << dt_dp.count() << " s\n";
+    std::cout << "  backtrack:                 " << dt_bt.count() << " s\n";
+    std::cout << "  structures found:          " << structures.size() << "\n";
+
+    // Optional: pair repartition for the returned structure(s)
+    int internal = 0, homogeneous = 0, heterogeneous = 0;
+
+    for (const auto& sec : structures) {
+        for (const auto& pair : sec.list_of_pairs) {
+            int strand_idx1 = pair[0];
+            int strand_idx2 = pair[2];
+
+            if (strand_idx1 == strand_idx2) {
+                internal++;
+            } else {
+                int seq_id1 = sec.list_of_sequences[strand_idx1 - 1];
+                int seq_id2 = sec.list_of_sequences[strand_idx2 - 1];
+
+                if (seq_id1 == seq_id2) homogeneous++;
+                else heterogeneous++;
+            }
+        }
+    }
+
+    int total = internal + homogeneous + heterogeneous;
+    if (total > 0) {
+        std::cout << "\nPair repartition:\n";
+        std::cout << "  internal      = " << (double)internal / total << "\n";
+        std::cout << "  homogeneous   = " << (double)homogeneous / total << "\n";
+        std::cout << "  heterogeneous = " << (double)heterogeneous / total << "\n";
+    } else {
+        std::cout << "\nNo pairs found.\n";
+    }
+}
+
+void run_random_homogeneous_soup(int length, int m_start, uint64_t seed) {
+    std::cout << "\n============================\n";
+    std::cout << "Random homogeneous soup"
+              << "   length=" << length
+              << "   m_start=" << m_start
+              << "   seed=" << seed << "\n";
+    std::cout << "============================\n";
+
+    seed_random(seed);
+    std::string base = generate_random_sequence(length);
+
+    std::unordered_map<int, std::string> strands;
+    for (int id = 1; id <= m_start; ++id)
+        strands[id] = base;
+
+        RNAEnergyEvaluator evaluator(strands);
+        vrna_param_t* params = evaluator.get_params();
+    
+        int m_size = m_start - 1;
+        int s_size = (int)strands.size();
+        int i_size = length;
+        int r_size = (int)strands.size();
+        int j_size = length;
+        int c_size = 2;
+    
+        Matrix5D C(m_size, s_size, i_size, r_size, j_size);
+        Matrix5D M(m_size, s_size, i_size, r_size, j_size);
+        Matrix5D M1_multi(m_size, s_size, i_size, r_size, j_size);
+        Matrix6D F(m_size, s_size, i_size, r_size, j_size, c_size);
+      
+    
+        MainAuxiliaryMatrix(strands, C, M, M1_multi, F, evaluator, params);
+    
+        auto structures = full_backtrack(strands, C, M, M1_multi, F, evaluator, params, theta);
+        std::cout << "structures found: " << structures.size() << "\n";
+    }
+
+//=======================================//
+
+void run_homogeneous(const std::string& motif, int motif_repeats, int n_strands) {
+
+    std::cout << "\n============================\n";
+    std::cout << "Homogeneous soup: (" << motif << ")_" << motif_repeats
+              << "   n_strands=" << n_strands;
+    std::cout << "\n============================\n";
+
+    // Build N distinct strand IDs (even if sequences identical)
+    std::unordered_map<int, std::string> strands;
+    std::string strand = generate_triplet_repeat(motif, motif_repeats);
+
+    for (int id = 1; id <= n_strands; ++id)
+        strands[id] = strand;
+
+    std::cerr << "DEBUG strands.size()=" << strands.size() << "\n";
+    std::cerr << "DEBUG strand[1].size()=" << strands.at(1).size()
+              << " first2='" << strands.at(1).substr(0,2) << "'\n";
+
+    // Single-strand evaluator
+    auto t0 = std::chrono::high_resolution_clock::now();
+    RNAEnergyEvaluator evaluator(strands);
+    vrna_param_t* params = evaluator.get_params();
+    auto t1 = std::chrono::high_resolution_clock::now();
+
+    // --- Dimensions ---
+    // m counts "extra strands besides the two endpoints (s and r)"
+    // So for N strands total, we need m_max = N - 2.
+    int m_max  = n_strands - 2;
+    if (m_max < 0) {
+        throw std::runtime_error("Need at least 2 strands for a multi-strand structure.");
+    }
+
+    int m_size = m_max + 1;               // m = 0..m_max
+    int s_size = n_strands;
+    int r_size = n_strands;
+
+    int i_size = int(strands.at(1).size()) - 1;   
+    int j_size = int(strands.at(1).size()) - 1;
+
+    int c_size = 2;
 
     Matrix5D C(m_size, s_size, i_size, r_size, j_size);
     Matrix5D M(m_size, s_size, i_size, r_size, j_size);
     Matrix5D M1_multi(m_size, s_size, i_size, r_size, j_size);
     Matrix6D F(m_size, s_size, i_size, r_size, j_size, c_size);
 
+    auto t2 = std::chrono::high_resolution_clock::now();
     MainAuxiliaryMatrix(strands, C, M, M1_multi, F, evaluator, params);
+    auto t3 = std::chrono::high_resolution_clock::now();
 
-    std::cout << std::endl << "========== full_backtrack ==========" << std::endl;
+    // Backtrack
+    auto t4 = std::chrono::high_resolution_clock::now();
     std::vector<output_backtrack> structures =
         full_backtrack(strands, C, M, M1_multi, F, evaluator, params, theta);
+    auto t5 = std::chrono::high_resolution_clock::now();
 
-    // Just to show them:
-    for (const auto& sec : structures) {
-        sec.print();
-    }
+    // Report timings
+    std::chrono::duration<double> dt_eval  = t1 - t0;
+    std::chrono::duration<double> dt_alloc = t2 - t1;
+    std::chrono::duration<double> dt_dp    = t3 - t2;
+    std::chrono::duration<double> dt_bt    = t5 - t4;
 
-    std::cout << std::endl << "========== compute_all_triplet_repartition ==========" << std::endl;
-    // Example: around 30 minutes for m_start = 2 and length = 10*3, etc.
-    // compute_all_triplet_repartition(6, 4); // enable when you want the full sweep
+    std::cout << "\nTimings:\n";
+    std::cout << "  evaluator (single strand): " << dt_eval.count()  << " s\n";
+    std::cout << "  matrix alloc:              " << dt_alloc.count() << " s\n";
+    std::cout << "  MainAuxiliaryMatrix DP:    " << dt_dp.count()    << " s\n";
+    std::cout << "  backtrack:                 " << dt_bt.count()    << " s\n";
+    std::cout << "  structures found:          " << structures.size() << "\n";
+}
 
-std::cout << std::endl << "==================== End of the program ====================" << std::endl;
-auto end_time = std::chrono::high_resolution_clock::now();
-std::chrono::duration<double> elapsed_time = end_time - start_time;
-std::cout << "Computation completed in " << elapsed_time.count() << " seconds." << std::endl << std::endl;
+//=============================================================================================//
 
+int main() {
+
+    std::cout << "\n==================== Strand Soup ====================\n";
+
+    int m_start = 5;
+    int repeats = 10;
+
+    auto start_time = std::chrono::high_resolution_clock::now();
+    //run_random_homogeneous_soup(10,  5, 1112);
+
+    //run_random_homogeneous_soup(60, m_start, 1111);
+    //run_homogeneous("AGGUACCUAAUUGCCUAGAAAACAUGAGGAUCACCCAUG", 1, m_start);
+
+    run_homogeneous_soup("CAG", repeats, m_start);
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end_time - start_time;
+    std::cout << "\nTOTAL wall time: " << elapsed.count() << " s\n";
     return 0;
 }
+

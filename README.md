@@ -38,7 +38,7 @@ where:
 -  m is the number of additional strands involved (excluding endpoints),
 -  s, i denote the left strand and position,
 -  r, j denote the right strand and position,
--  c encodes whether the configuration is square or bubble.
+-  c encodes whether the strands are connected or not.
 
 2. **MainAuxiliaryMatrix**  
     The main dynamic programming routine that fills the 6D matrix using a thermodynamically consistent recurrence system.

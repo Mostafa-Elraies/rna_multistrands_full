@@ -2,7 +2,7 @@
 
 ---
 
-We aim at providing a C++ implementation of a dynamic programming scheme for a thermodynamical Turner energy model the Strand soup Interaction model. This model is found in the following paper : 
+We aim at providing a C++ implementation of a dynamic programming scheme for a thermodynamical Turner energy model of a Strand soup Interaction algorithm. This model is found in the following paper : 
 
 **RNA Triplet Repeats: Improved Algorithms for Structure Prediction and Interactions**  
 Kimon Boehmer1, Sarah J. Berkemer1,2, Sebastian Will1, Yann Ponty1
@@ -45,13 +45,10 @@ where:
 
 Key features:
 
--    Supports inter-strand base pairing
-
+-   Supports inter-strand base pairing
 -   Explicit handling of multiloops, interior loops, hairpins, and external regions
-
 -   Uses ViennaRNA low-level energy functions instead of heuristic constants
-
-Ensures consistency with ViennaRNA’s loop decomposition and energy model
+-   Ensures consistency with ViennaRNA’s loop decomposition and energy model
 3. **RNAEnergyEvaluator**  
    central abstraction that encapsulates all thermodynamic energy calculations.
 

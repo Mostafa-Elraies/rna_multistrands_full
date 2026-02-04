@@ -35,25 +35,21 @@ Each DP state is indexed as:
 F(m, s, i, r, j, c)
 
 where:
-
-    m is the number of additional strands involved (excluding endpoints),
-
-    s, i denote the left strand and position,
-
-    r, j denote the right strand and position,
-
-    c encodes whether the configuration is square or bubble.
+-  m is the number of additional strands involved (excluding endpoints),
+-  s, i denote the left strand and position,
+-  r, j denote the right strand and position,
+-  c encodes whether the configuration is square or bubble.
 
 2. **MainAuxiliaryMatrix**  
     The main dynamic programming routine that fills the 6D matrix using a thermodynamically consistent recurrence system.
 
-    Key features:
+Key features:
 
-    Supports inter-strand base pairing
+-    Supports inter-strand base pairing
 
-    Explicit handling of multiloops, interior loops, hairpins, and external regions
+-   Explicit handling of multiloops, interior loops, hairpins, and external regions
 
-    Uses ViennaRNA low-level energy functions instead of heuristic constants
+-   Uses ViennaRNA low-level energy functions instead of heuristic constants
 
 Ensures consistency with ViennaRNA’s loop decomposition and energy model
 3. **RNAEnergyEvaluator**  
@@ -61,17 +57,15 @@ Ensures consistency with ViennaRNA’s loop decomposition and energy model
 
 Responsibilities:
 
-    - Builds a ViennaRNA fold_compound for each strand
-    
-    - Stores ViennaRNA sequence encodings (S1) for every strand
-
-    - Computes loop energies using ViennaRNA low-level APIs:
+- Builds a ViennaRNA fold_compound for each strand
+- Stores ViennaRNA sequence encodings (S1) for every strand
+- Computes loop energies using ViennaRNA low-level APIs:
     hairpin loops
     interior loops (intra- and inter-strand)
     multiloop penalties (MLclosing, MLintern, MLbase)
     exterior stem energies
     
-    - Computes single-strand DP matrices (C, M, M1, F) consistently with ViennaRNA
+- Computes single-strand DP matrices (C, M, M1, F) consistently with ViennaRNA
 
     This class guarantees that cross-strand interactions use the same pairing types and penalties as single-strand folding.
 
@@ -158,8 +152,6 @@ The backtracking is done with 3 functions :
 - `backtrack_C_multi` 
 - `backtrack_M_multi`
 - `backtrack_M1_multi`
--
-
 
 The output of these backtracks is handled with a class : 
 `output_backtrack` 

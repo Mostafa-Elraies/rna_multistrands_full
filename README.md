@@ -146,12 +146,16 @@ Concerning the `Matrix6D` :
 - the dimension of c is 2.
 
 
-The backtracking is done with 3 functions : 
+The backtracking is done with these functions : 
 - `backtrack_F_multi_square`
 - `bubble_backtrackbubble_backtrack`
 - `backtrack_C_multi` 
 - `backtrack_M_multi`
 - `backtrack_M1_multi`
+- `backtrack_Fs`
+- `backtrack_Cs`
+- `backtrack_M1s`
+- `backtrack_Ms`
 
 The output of these backtracks is handled with a class : 
 `output_backtrack` 

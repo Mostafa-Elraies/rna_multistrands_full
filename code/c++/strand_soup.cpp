@@ -6,7 +6,6 @@
  * for RNA structure prediction, including the matrix filling and the backtracking.
  * 
  * 
- * 
  * COMPILATION of this file for testing:
  * Go to the strand_soup.ccp directory where the Makefile should also be and run the following command in the terminal:
  *      make clean
@@ -435,7 +434,7 @@ class output_backtrack{
 /**
  *  @brief Computes the 5D matrix for the M1_multi loop. 
  * 
- * This function computes the minimum energy for the first multi loop in the RNA strand soup problem. It considers the 2 cases and returns the minimum energy. 
+ * This function computes the minimum energy for the first multi loop in the RNA strand soup problem. It considers the 2 cases and fills the matrix. 
  * 
  * @param m The number of strands remaining in the soup.
  * @param s The index of the starting strand. (1-based)
@@ -480,7 +479,8 @@ void M1MultiMatrixMinimization(int m, int s, int i, int r, int j,
 /**
  * @brief Computes the 5D matrix for the  closed structure case of the RNA strand soup problem.
  * 
- * This function computes the minimum energy for a bubble case in the RNA strand soup problem. It considers the 5 cases and returns the minimum energy.
+ * This function computes the minimum energy for a bubble case in the RNA strand soup problem. 
+ * It considers the 5 cases and fills the matrix enteries with the minimum energy.
  * 
  * @param m The number of strands remaining in the soup.
  * @param s The index of the starting strand. (1-based)
@@ -874,13 +874,14 @@ void MainAuxiliaryMatrix(std::unordered_map<int, std::string> strands,
                                             strands, C, M, F, evaluator);
                                 }
                             }
-                        } // end for c
-                    } // end for j
-                } // end for r
-            } // end for i
-        } // end for s
-    } // end for m
-}//======================================    Backtrack functions    ==============================================//
+                        } 
+                    } 
+                } 
+            } 
+        } 
+    } 
+}
+//======================================    Backtrack functions    ==============================================//
 
 
 
@@ -1021,8 +1022,8 @@ Find_all_start_backtrack(Matrix6D& F, int n_strands, int c_target = 1) {
  
      // --- Multiloop closure ---
      for (int u = i + 1; u < j; ++u) {
-        int left  = M1[i + 1][u];       // valid when i+1 <= u
-        int right = M[u + 1][j - 1];    // valid when u+1 <= j-1
+        int left  = M1[i + 1][u];       
+        int right = M[u + 1][j - 1];   
     
         if (left >= inf_energy || right >= inf_energy) continue;
     
@@ -1259,7 +1260,7 @@ output_backtrack backtrack_F_multi_bubble(
         }
     }
 
-    // --- Case 4 : i pairs with r at k (multi C + single-strand tail) ---
+    // --- Case 4 : i pairs with r at k (multi C + single-strand "free folding" tail) ---
     if (c == 1) {
         const std::string& seq_s = strands.at(s);
         const std::string& seq_r = strands.at(r);
@@ -2023,7 +2024,7 @@ void run_homogeneous_soup(const std::string& triplet, int repeats, int m_start) 
               << "   length=" << seq_len << "\n";
     std::cout << "============================\n";
 
-    // Build 7 distinct strands (even if sequences identical)
+    // Build distinct strands (even if sequences identical)
     std::unordered_map<int, std::string> strands;
     std::string strand = generate_triplet_repeat(triplet, repeats);
     for (int id = 1; id <= m_start; ++id)
@@ -2079,7 +2080,7 @@ void run_homogeneous_soup(const std::string& triplet, int repeats, int m_start) 
     std::cout << "  backtrack:                 " << dt_bt.count() << " s\n";
     std::cout << "  structures found:          " << structures.size() << "\n";
 
-    // Optional: pair repartition for the returned structure(s)
+    // pair repartition for the returned structure(s)
     int internal = 0, homogeneous = 0, heterogeneous = 0;
 
     for (const auto& sec : structures) {

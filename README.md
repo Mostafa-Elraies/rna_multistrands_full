@@ -5,7 +5,7 @@
 We aim at providing a C++ implementation of a dynamic programming scheme for a thermodynamical Turner energy model of a Strand soup Interaction algorithm. This model is found in the following paper : 
 
 **RNA Triplet Repeats: Improved Algorithms for Structure Prediction and Interactions**  
-Kimon Boehmer1, Sarah J. Berkemer1,2, Sebastian Will1, Yann Ponty1
+Kimon Boehmer, Sarah J. Berkemer, Sebastian Will, Yann Ponty
 
 
 
@@ -43,7 +43,7 @@ where:
 2. **MainAuxiliaryMatrix**  
     The main dynamic programming routine that fills the 6D matrix using a thermodynamically consistent recurrence system.
 
-Key features:
+# Key features:
 
 -   Supports inter-strand base pairing
 -   Explicit handling of multiloops, interior loops, hairpins, and external regions
@@ -69,7 +69,7 @@ Responsibilities:
 4. **Backtracking System**  
     A unified backtracking framework that reconstructs optimal structures from the DP matrix.
 
-Key components:
+# Key components:
 
 - backtrack_F_multi_square: handles square configurations
 
@@ -134,7 +134,7 @@ The strands are 1-based strings. They are represented with a `$`sign in front of
 The set $R$ is implemented using a `std::unordered_map<int, std::string>`. Each unique sequence is associated to an int.
 
 
-Concerning the `Matrix6D` : 
+# Concerning the `Matrix6D` : 
 - It is 1-based. To access the elements, use the operator ().
 - The dimensions of the matrix follow the lexicographic order and are therefore : m,s,i,r,j,c
 - the size of the first dimension is m-1. To avoid confusion we use m_start for the initial number of strands in the soup and m_size for the size of the first dimension of the matrix. m_size = m_start-1. 
@@ -143,7 +143,7 @@ Concerning the `Matrix6D` :
 - the dimension of c is 2.
 
 
-The backtracking is done with these functions : 
+# The backtracking is done with these functions : 
 - `backtrack_F_multi_square`
 - `bubble_backtrackbubble_backtrack`
 - `backtrack_C_multi` 
@@ -154,10 +154,10 @@ The backtracking is done with these functions :
 - `backtrack_M1s`
 - `backtrack_Ms`
 
-The output of these backtracks is handled with a class : 
+# The output of these backtracks is handled with a class : 
 `output_backtrack` 
 
-This class contains two elements : 
+# This class contains two elements : 
 - An ordered list of the type of strands involved in the secondary structure which is a sub-sequence of $\{t_1, \dots, t_m\}$.
 - a list of all the pairings of this sub-structure : (x,i,y,j) with x the index of the first strand within the ordered list, i its base, y the second strand, j its base. 
   

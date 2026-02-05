@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <string>
 
-// forward declare evaluator + Vienna params
+// evaluator + Vienna params
 class RNAEnergyEvaluator;
 struct vrna_param_s;
 typedef struct vrna_param_s vrna_param_t;
@@ -62,7 +62,6 @@ public:
     void print() const;
 };
 
-// ================= API =================
 void MainAuxiliaryMatrix(std::unordered_map<int, std::string> strands,
                          Matrix5D& C, Matrix5D& M, Matrix5D& M1_multi, Matrix6D& F,
                          RNAEnergyEvaluator& evaluator,

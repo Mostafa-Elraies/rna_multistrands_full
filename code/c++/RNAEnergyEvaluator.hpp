@@ -63,7 +63,7 @@ private:
     std::unordered_map<int, short*> S1_map;
     vrna_param_t *params = nullptr;
 
-    // Single-strand DP matrices (Vienna-like)
+    // Single-strand DP matrices (Vienna-like but mirrored for multi loops decompsition parts M1 M)
     std::unordered_map<int, Matrix> C_s, M_s, M1_s, F_s;
 };
 

@@ -1,3 +1,13 @@
+/**
+ * @file RNAEnergyEvaluator.cpp
+ * @brief This acts as a wrapper to interface with Vienna RNA package to extract 
+ * thermodynamic parameters. 
+ *
+ * Here are also the single strands folding
+ * 
+ */
+
+
 #include <iostream>
 #include <string>
 #include <unordered_map>
@@ -28,7 +38,7 @@ RNAEnergyEvaluator::RNAEnergyEvaluator(const std::unordered_map<int, std::string
   
     for (const auto &[s, seq_with_dollar] : strands_1b) {
   
-      // clean sequence (no '$')
+      // Removing the $...
       const std::string clean =
           (!seq_with_dollar.empty() && seq_with_dollar[0] == '$')
           ? seq_with_dollar.substr(1)
@@ -41,11 +51,11 @@ RNAEnergyEvaluator::RNAEnergyEvaluator(const std::unordered_map<int, std::string
       vrna_fold_compound_t *fc = vrna_fold_compound(clean.c_str(), &md, VRNA_OPTION_MFE);
       fold_compounds[s] = fc;
   
-      // fill matrices (Vienna side)
+      // fill mfe matrices (Vienna)
       vrna_mfe(fc, nullptr);
   
       int len = (int)clean.size();
-      // evaluator (int energy world)
+      
 static constexpr int INF_INT = std::numeric_limits<int>::max() / 4;
 
 
@@ -61,7 +71,7 @@ static constexpr int INF_INT = std::numeric_limits<int>::max() / 4;
       M1_s[s] = std::move(M1);
       F_s[s]  = std::move(F);
   
-      // store Vienna encoding pointer (1..len valid)
+      //  Vienna encoding pointer:
       S1_map[s] = fc->sequence_encoding;
   
       // now we compute single-strand DP (fills C_s/M_s/M1_s/F_s)
@@ -81,7 +91,7 @@ static constexpr int INF_INT = std::numeric_limits<int>::max() / 4;
       
   
   void RNAEnergyEvaluator::fill_single_strand(int s) {
-    const std::string& seq = strands_1b.at(s);   // includes '$' at [0]
+    const std::string& seq = strands_1b.at(s);   // with $ at [0]
     auto& F  = F_s[s];
     auto& C  = C_s[s];
     auto& M  = M_s[s];
@@ -89,23 +99,20 @@ static constexpr int INF_INT = std::numeric_limits<int>::max() / 4;
     const short* S1 = S1_map.at(s);
     static constexpr int INF_INT = std::numeric_limits<int>::max() / 4;
 
-    const int n = (int)seq.size() - 1;  // 1..n valid
+    const int n = (int)seq.size() - 1;  
 
-    // -----------------------------
-    // Initialization
-    // -----------------------------
+    // Initialization:
     for (int i = 0; i <= n; ++i) {
         for (int j = 0; j <= n; ++j) {
             C[i][j]  = INF_INT;
             M1[i][j] = INF_INT;
             F[i][j]  = INF_INT;
 
-            // allow empty multiloop segment = 0 energy
             M[i][j]  = (i > j) ? 0 : INF_INT;
         }
     }
 
-    // Fs base: empty or length-0/1 region = 0
+    // -----------------------------
     for (int i = 1; i <= n; ++i) {
         for (int j = 1; j <= n; ++j) {
             if (i >= j) F[i][j] = 0;
@@ -113,7 +120,10 @@ static constexpr int INF_INT = std::numeric_limits<int>::max() / 4;
     }
 
     // -----------------------------
-    // Main DP by increasing span
+    // As we did in the 6D matrix filling, we want to fill the small problems first:
+    // span = j-i
+    // and then we go for bigger and bigger problems. 
+
     // -----------------------------
     for (int span = 0; span <= n; ++span) {
         for (int i = n; i >= 1; --i) {
@@ -141,7 +151,8 @@ static constexpr int INF_INT = std::numeric_limits<int>::max() / 4;
                 }
 
                 // (c) multiloop closure:
-                // C[i][j] = MLclosing + M1[i+1][u] + M[u+1][j-1]
+                // C[i][j] = MLclosing + M1[i+1][u] + M[u+1][j-1] 
+                // in the original Vienna it was M+M1; mirrored; but we have to keep our style the same.
                 for (int u = i + 1; u <= j - 1; ++u) {
                     int left  = M1[i + 1][u];
                     int right = M[u + 1][j - 1];  
@@ -157,15 +168,15 @@ static constexpr int INF_INT = std::numeric_limits<int>::max() / 4;
                 C[i][j] = INF_INT;
             }
 
-            // 2) M1[i][j] : multiloop entry segment (consume-i style)
+            // 2) M1[i][j] 
             {
                 int best = INF_INT;
 
-                // (a) i unpaired in ML
+                // (a) i unpaired 
                 if (i + 1 <= j && M1[i + 1][j] < INF_INT)
                     best = std::min(best, M1[i + 1][j] + params->MLbase);
 
-                // (b) start helix C[i][u] and pay MLintern(type(i,u))
+                // (b) start helix C[i][u] and pay cost b, in vienne it's --> MLintern(type(i,u))
                 if (C[i][j] < INF_INT) {
                     int type = vrna_get_ptype_md(S1[i], S1[j], &params->model_details);
                     int penalty = params->MLintern[type];
@@ -175,7 +186,7 @@ static constexpr int INF_INT = std::numeric_limits<int>::max() / 4;
                 M1[i][j] = best;
             }
 
-            // 3) M[i][j] : multiloop segment (consume-i style)
+            // 3) M[i][j] 
             {
                 int best = (i > j) ? 0 : INF_INT;
 
@@ -192,7 +203,7 @@ static constexpr int INF_INT = std::numeric_limits<int>::max() / 4;
                         best = std::min(best, C[i][u] + penalty + M[u + 1][j]);
                     }
 
-                    // (c) start directly from C[i][u] (no right M part)
+                    // (c) start directly from C[i][u] (Here we are following the same algorithmic routine as in Vienna but mirrored) 
                     for (int u = i; u <= j; ++u) {
                         if (C[i][u] >= INF_INT) continue;
                         int type = vrna_get_ptype_md(S1[i], S1[u], &params->model_details);
@@ -204,7 +215,7 @@ static constexpr int INF_INT = std::numeric_limits<int>::max() / 4;
                 M[i][j] = best;
             }
 
-            // 4) F[i][j] : external region (consume-i style)
+            // 4) F[i][j] 
             {
                 int best = (i >= j) ? 0 : INF_INT;
 
@@ -280,15 +291,13 @@ int RNAEnergyEvaluator::interior_loop_energy_cross(int s, int i, int r, int j, i
     int sj1 = S1s.at(r)[j - 1];
     int sp1 = S1s.at(s)[k - 1];
     int sq1 = S1s.at(r)[l + 1];
-    // inner pair must be enclosed
-assert(i < k);
-assert(l < j);
 
-// mismatch indices must exist
-assert(i + 1 <= ns);
-assert(k - 1 >= 1);
-assert(j - 1 >= 1);
-assert(l + 1 <= nr);
+    assert(i < k);
+    assert(l < j);
+    assert(i + 1 <= ns);
+    assert(k - 1 >= 1);
+    assert(j - 1 >= 1);
+    assert(l + 1 <= nr);
 
   
     int e = E_IntLoop(u1, u2, type, type2, si1, sj1, sp1, sq1, params);
@@ -316,5 +325,3 @@ int RNAEnergyEvaluator::stem_energy(int i, int j, int s) const {
     int sj1  = S1_map.at(s)[j - 1];
     return vrna_E_exterior_stem(type, si1, sj1, params);
 }
-
-

@@ -2227,16 +2227,20 @@ int main() {
 
     std::cout << "\n==================== Strand Soup ====================\n";
 
-    int m_start = 5;
-    int repeats = 10;
+    int m_start = 2;
+    int repeats = 31;
 
     auto start_time = std::chrono::high_resolution_clock::now();
-    //run_random_homogeneous_soup(10,  5, 1112);
+    //run_random_homogeneous_soup(30,  10, 1112);
 
     //run_random_homogeneous_soup(60, m_start, 1111);
     //run_homogeneous("AGGUACCUAAUUGCCUAGAAAACAUGAGGAUCACCCAUG", 1, m_start);
 
-    run_homogeneous_soup("CAG", repeats, m_start);
+   run_homogeneous_soup("CAG", repeats, m_start);
+   run_homogeneous_soup("CUG", repeats, m_start);
+
+   run_homogeneous_soup("CAG", repeats, 3);
+   run_homogeneous_soup("CUG", repeats, 3);
 
     auto end_time = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed = end_time - start_time;

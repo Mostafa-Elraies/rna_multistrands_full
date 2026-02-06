@@ -20,13 +20,13 @@ ___
 
 # Strand soup algorithm incorporating turner energy model.
 
-### The problem
+## The problem
 
  The goal is to find the structure that minimizez the thermodynamical Energy as in Tunerner energy model.
  The goal is to find the secondary structure that minimizes the energy. 
 
 
-### Key Components
+## Key Components
 
 1. **Matrix6D Class**  
 A 6-dimensional dynamic programming matrix used to store thermodynamic energy values for all multi-strand configurations of the Strand Soup model.
@@ -43,7 +43,7 @@ where:
 2. **MainAuxiliaryMatrix**  
     The main dynamic programming routine that fills the 6D matrix using a thermodynamically consistent recurrence system.
 
-# Key features:
+### Key features:
 
 -   Supports inter-strand base pairing
 -   Explicit handling of multiloops, interior loops, hairpins, and external regions
@@ -69,7 +69,7 @@ Responsibilities:
 4. **Backtracking System**  
     A unified backtracking framework that reconstructs optimal structures from the DP matrix.
 
-# Key components:
+### Key components:
 
 - backtrack_F_multi_square: handles square configurations
 
@@ -143,7 +143,7 @@ The set $R$ is implemented using a `std::unordered_map<int, std::string>`. Each 
 - the dimension of c is 2.
 
 
-# The backtracking is done with these functions : 
+### The backtracking is done with these functions : 
 - `backtrack_F_multi_square`
 - `bubble_backtrackbubble_backtrack`
 - `backtrack_C_multi` 
@@ -154,10 +154,10 @@ The set $R$ is implemented using a `std::unordered_map<int, std::string>`. Each 
 - `backtrack_M1s`
 - `backtrack_Ms`
 
-# The output of these backtracks is handled with a class : 
+### The output of these backtracks is handled with a class : 
 `output_backtrack` 
 
-# This class contains two elements : 
+### This class contains two elements : 
 - An ordered list of the type of strands involved in the secondary structure which is a sub-sequence of $\{t_1, \dots, t_m\}$.
 - a list of all the pairings of this sub-structure : (x,i,y,j) with x the index of the first strand within the ordered list, i its base, y the second strand, j its base. 
   

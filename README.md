@@ -113,6 +113,7 @@ Helper functions and data structures used throughout the project, including:
 This project requires the ViennaRNA package to be installed in order to compile and run correctly.
 Please refer to the official ViennaRNA documentation for [installation](https://www.tbi.univie.ac.at/RNA/?utm_source=chatgpt.com#).
 
+---
 
 ### Description of the file hierarchy
 

@@ -1,4 +1,4 @@
-# RNA_Triplets
+# RNA multistrand interaction model
 
 ---
 
@@ -52,7 +52,7 @@ where:
 3. **RNAEnergyEvaluator**  
    central abstraction that encapsulates all thermodynamic energy calculations.
 
-Responsibilities:
+### Responsibilities:
 
 - Builds a ViennaRNA fold_compound for each strand
 - Stores ViennaRNA sequence encodings (S1) for every strand
@@ -162,6 +162,21 @@ The set $R$ is implemented using a `std::unordered_map<int, std::string>`. Each 
 - a list of all the pairings of this sub-structure : (x,i,y,j) with x the index of the first strand within the ordered list, i its base, y the second strand, j its base. 
   
 There is a method shift that allows to shift the indices of the strands before merging them to the upper-problem. The idea is that when we merge the sub-problem, we add the oredered list somewhere in the ordered list of the upper case. Therefore the values x and y of the pairs involved in the subproblem must be shifted with respect to where the sub-rpbolem is within the upper problem. 
+
+---
+
+
+
+## Acknowledgments
+
+The first version of this code (a simplistic base pair model) was done by Tom SAVARD. 
+Tom's version was used to build this Turner Energy based model.
+
+The work done with the Vienna RNA package was under the supervision of Sebastian Will.
+
+### Supervision:
+Sarah J. Berkemer
+Yann Ponty
 
 ---
 

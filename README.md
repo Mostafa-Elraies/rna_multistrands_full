@@ -183,6 +183,7 @@ The work done with the Vienna RNA package was under the supervision of Sebastian
 
 ### Supervision:
 Sarah J. Berkemer
+
 Yann Ponty
 
 ---

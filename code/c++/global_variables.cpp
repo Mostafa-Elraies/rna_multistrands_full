@@ -10,7 +10,7 @@
 
 const int theta = 3; // Usually set to 3
 
-const float inf_energy = std::numeric_limits<float>::infinity();
+const float inf_energy = 1e9f;  // large finite sentinel — avoids NaN/-inf on Linux/gcc
 
 const std::vector< std::pair<char, char> > possible_pairs = {
     {'A','U'}, {'U','A'}, {'G','C'}, {'C','G'}, {'G','U'}, {'U','G'}

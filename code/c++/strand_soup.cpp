@@ -946,6 +946,10 @@ mismatch argument.
                                      }
                                  } else {
                                      // === GENERAL CASE (bubble case) ===
+                                     if (j > len_r) {
+                                         F(m, s, i, r, j, c) = inf_energy;
+                                         continue;
+                                     }
                                      F(m, s, i, r, j, c) =
                                          GeneralCaseMinimization(m, s, i, r, j, c,
                                              strands, C, M, F, evaluator);
@@ -2506,11 +2510,11 @@ void run_heterogeneous_general(const std::vector<std::string>& sequences, int m_
      //run_random_homogeneous_soup(60, m_start, 1111);
      //run_homogeneous("AGGUACCUAAUUGCCUAGAAAACAUGAGGAUCACCCAUG", 1, m_start);
  
-    //run_homogeneous_soup("CGG", repeats, m_start);
+    run_homogeneous_soup("CGG", 16, 5);
     //run_homogeneous_soup("CAU", repeats, m_start);
  
     //run_heterogeneous_triplets({"CAG", "GAU", "UAG","CCG"}, 10);
-    run_heterogeneous_general ({"CAGCAGCAGCAG", "CGGCGGCGG","CUGCUGCUGCUGCUG"}, 8);
+    //run_heterogeneous_general ({"CAGCAGCAGCAG", "CGGCGGCGG", "UUUUUCGAGCAGCA","CUGCUGCUGCUGCUCCUG"}, 12);
      auto end_time = std::chrono::high_resolution_clock::now();
      std::chrono::duration<double> elapsed = end_time - start_time;
      std::cout << "\nTOTAL wall time: " << elapsed.count() << " s\n";

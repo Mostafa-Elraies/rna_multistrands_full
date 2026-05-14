@@ -39,7 +39,12 @@ RNAEnergyEvaluator::RNAEnergyEvaluator(const std::unordered_map<int, std::string
   
     vrna_md_t md;
     vrna_md_set_default(&md);
-  
+
+    // ── Conditions ──────────────────────────────────────────────
+    md.salt        = 1.021;   // M  (E. coli physiological: 0.15 | default: 1.021)
+    md.temperature = 37.0;   // °C (E. coli: 37 | default: 37)
+    // ────────────────────────────────────────────────────────────
+
     params = vrna_params(&md);
     for (const auto &[s, seq] : input_strands) {
         if (seq.empty() || seq[0] != '$') {

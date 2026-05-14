@@ -28,7 +28,7 @@ public:
 
 private:
     int m_size, s_size, i_size, r_size, j_size, c_size;
-    std::vector<std::vector<std::vector<std::vector<std::vector<std::vector<float>>>>>> data;
+        std::vector<std::vector<std::vector<std::vector<std::vector<std::vector<float>>>>>> data;
 };
 
 // ================= Matrix5D =================

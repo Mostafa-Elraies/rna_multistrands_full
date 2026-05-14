@@ -42,6 +42,7 @@
  #include <unordered_set>
  #include "RNAEnergyEvaluator.hpp"
  #include "utilities.hpp"
+ #include "matrices.hpp"
  
  extern "C" {
      #include <ViennaRNA/loop_energies.h>
@@ -59,336 +60,6 @@ static inline float E_MLstem_nd(int type, const vrna_param_t* p) {
     if (type == 0) return 0.0f;
     return (float)(p->MLintern[type] + (type > 2 ? p->TerminalAU : 0));
 }
- 
- 
- 
- //======================================    The Classes    ==============================================//
- 
- 
- 
- /**
-  * @class Matrix6D
-  * @brief A class representing a 6D matrix used in the strand soup algorithm.
-  * 
-  * This class handles a 6-dimensional matrix with specific sizes for each dimension.
-  * The matrix corresponds to the full energy matrix (free) used in the RNA folding calculations.
-  * It provides methods for accessing and modifying the matrix elements.
-  * There are 6 dimensions:
-  * - m: Number of dimensions needed in total for m. If we start with m_start strands, we need m = m_start-1 dimensions (easy to see with m_start = 2. once s and r are selected we only have the case m=0,so this dim is of size 2-1 = 1
-  * - s: Strand type count (1-based)
-  * - i: Max Nucleotide count in one of the strands (1-based)
-  * - r: Strand type count (1-based)
-  * - j: Max Nucleotide count in one of the strands (1-based)
-  * - c: Connectivity bit (0 or 1)
-  * 
-  */
- 
- 
- 
- 
- class Matrix6D{
-     public:
-     /**
-      * @brief Constructor that initializes a 6D matrix with specified sizes.
-      * 
-      * @param m_size Size of the first dimension. Strand count in the soup -2 (the strands s and r are not counted)
-      * @param s_size Size of the second dimension : Strand type count (1-based)
-      * @param i_size Size of the third dimension : Nucleotide count in the first strand (1-based)
-      * @param r_size Size of the fourth dimension : Strand type count (1-based)
-      * @param j_size Size of the fifth dimension : Nucleotide count in the second strand (1-based)
-      * @param c_size Size of the sixth dimension = 2  : Connectivity bit (0 or 1).
-      */
-     Matrix6D(int m_size, int s_size, int i_size, int r_size, int j_size, int c_size)
-         : m_size(m_size), s_size(s_size), i_size(i_size), r_size(r_size), j_size(j_size), c_size(c_size) {
-         data = std::vector<std::vector<std::vector<std::vector<std::vector<std::vector<float>>>>>>(
-             m_size, std::vector<std::vector<std::vector<std::vector<std::vector<float>>>>>(
-             s_size, std::vector<std::vector<std::vector<std::vector<float>>>>(
-             i_size + 2, std::vector<std::vector<std::vector<float>>>( //! we add one column before and after for border effect
-             r_size, std::vector<std::vector<float>>(
-             j_size + 2, std::vector<float>( //! we add one column before and after for border effect
-             c_size, 0))))));
-     }
- 
-     /**
-      * @brief Accessor method for the matrix elements.
-      * 
-      * @param m Index of the first dimension
-      * @param s Index of the second dimension
-      * @param i Index of the third dimension
-      * @param r Index of the fourth dimension
-      * @param j Index of the fifth dimension
-      * @param c Index of the sixth dimension
-      * @return Reference to the element in the matrix
-      * 
-      * Throws an out_of_range exception if indices are out of bounds.
-      */
- 
- float& operator()(int m, int s, int i, int r, int j, int c) {
-     if (s <= 0 || s > s_size) {
-         std::ostringstream oss;
-         oss << "Index s out of range: s=" << s << " s_size=" << s_size;
-         throw std::out_of_range(oss.str());
-     }
-     if (r <= 0 || r > r_size) {
-         std::ostringstream oss;
-         oss << "Index r out of range: r=" << r << " r_size=" << r_size;
-         throw std::out_of_range(oss.str());
-     }
-     if (i < 0 || i >= i_size + 2) {
-         std::ostringstream oss;
-         oss << "Index i out of range: i=" << i
-             << " allowed=[0.." << (i_size + 1) << "]"
-             << " (i_size=" << i_size << ")"
-             << " at F(m=" << m << ", s=" << s << ", i=" << i
-             << ", r=" << r << ", j=" << j << ", c=" << c << ")";
-         throw std::out_of_range(oss.str());
-     }
-     if (j < 0 || j >= j_size + 2) {
-         std::ostringstream oss;
-         oss << "Index j out of range: j=" << j
-             << " allowed=[0.." << (j_size + 1) << "]"
-             << " (j_size=" << j_size << ")"
-             << " at F(m=" << m << ", s=" << s << ", i=" << i
-             << ", r=" << r << ", j=" << j << ", c=" << c << ")";
-         throw std::out_of_range(oss.str());
-     }
-     if (m < 0 || m >= m_size) {
-         std::ostringstream oss;
-         oss << "Index m out of range: m=" << m << " m_size=" << m_size;
-         throw std::out_of_range(oss.str());
-     }
-     if (c < 0 || c >= c_size) {
-         std::ostringstream oss;
-         oss << "Index c out of range: c=" << c << " c_size=" << c_size;
-         throw std::out_of_range(oss.str());
-     }
- 
-     return data[m][s-1][i][r-1][j][c];
- }
- 
- 
-     int get_m_size() const { return m_size; }
-     int get_s_size() const { return s_size; }
-     int get_i_size() const { return i_size; } // i_size is the real number of bases in the strand (It's the size of the 3rd dimension -2)
-     int get_r_size() const { return r_size; }
-     int get_j_size() const { return j_size; } // j_size is the real number of bases in the strand (It's the size of the 5th dimension -2)
-     int get_c_size() const { return c_size; }
- 
- private:
-     int m_size, s_size, i_size, r_size, j_size, c_size;
-     std::vector<std::vector<std::vector<std::vector<std::vector<std::vector<float>>>>>> data;
- };
- 
- 
- /**
-  * @class Matrix5D
-  * @brief A class representing a 5D matrix used in the strand soup algorithm.
-  * 
-  * This class handles a 5-dimensional matrix with specific sizes for each dimension.
-  * The matrix corresponds to the C (close) and the M (multi) matrices used in the full model RNA prediction.
-  * It provides methods for accessing and modifying the matrix elements.
-  * There are 5 dimensions:
-  * - m: Number of dimensions needed in total for m. If we start with m_start strands, we need m = m_start-1 dimensions (easy to see with m_start = 2. once s and r are selected we only have the case m=0,so this dim is of size 2-1 = 1
-  * - s: Strand type count (1-based)
-  * - i: Max Nucleotide count in one of the strands (1-based)
-  * - r: Strand type count (1-based)
-  * - j: Max Nucleotide count in one of the strands (1-based)
-  */
- class Matrix5D{
-     public:
-     /**
-      * @brief Constructor that initializes a 5D matrix with specified sizes.
-      * 
-      * @param m_size Size of the first dimension. Strand count in the soup -2 (the strands s and r are not counted)
-      * @param s_size Size of the second dimension : Strand type count (1-based)
-      * @param i_size Size of the third dimension : Nucleotide count in the first strand (1-based)
-      * @param r_size Size of the fourth dimension : Strand type count (1-based)
-      * @param j_size Size of the fifth dimension : Nucleotide count in the second strand (1-based)
-      */
-     Matrix5D(int m_size, int s_size, int i_size, int r_size, int j_size)
-         : m_size(m_size), s_size(s_size), i_size(i_size), r_size(r_size), j_size(j_size) {
-         data = std::vector<std::vector<std::vector<std::vector<std::vector<float>>>>>(
-             m_size, std::vector<std::vector<std::vector<std::vector<float>>>>(
-             s_size, std::vector<std::vector<std::vector<float>>>(
-             i_size + 2, std::vector<std::vector<float>>( //! we add one column before and after for border effect
-             r_size, std::vector<float>(
-             j_size + 2,  //! we add one column before and after for border effect
-             0)))));
-     }
- 
-     /**
-      * @brief Accessor method for the matrix elements.
-      * 
-      * @param m Index of the first dimension
-      * @param s Index of the second dimension
-      * @param i Index of the third dimension
-      * @param r Index of the fourth dimension
-      * @param j Index of the fifth dimension
-      * @return Reference to the element in the matrix
-      * 
-      * Throws an out_of_range exception if indices are out of bounds.
-      */
-     float& operator()(int m, int s, int i, int r, int j) {
-         if (s <= 0 || s > s_size) {
-             throw std::out_of_range("Index s is out of range");
-         }
-         if (r <= 0 || r > r_size) {
-             throw std::out_of_range("Index r is out of range");
-         }
-         if (i < 0 || i >= i_size + 2) {
-             throw std::out_of_range("Index i is out of range");
-         }
-         if (j < 0 || j >= j_size + 2) {
-             throw std::out_of_range("Index j is out of range");
-         }
-         return data[m][s-1][i][r-1][j]; // 1-based indexing for strands and bases
-     }
- 
-     int get_m_size() const { return m_size; }
-     int get_s_size() const { return s_size; }
-     int get_i_size() const { return i_size; } // i_size is the real number of bases in the strand (It's the size of the 3rd dimension -2)
-     int get_r_size() const { return r_size; }
-     int get_j_size() const { return j_size; } // j_size is the real number of bases in the strand (It's the size of the 5th dimension -2)
-    
- private:
-     int m_size, s_size, i_size, r_size, j_size;
-     std::vector<std::vector<std::vector<std::vector<std::vector<float>>>>> data;
- };
- 
- 
- 
- 
- 
- /**
-  * @class output_backtrack
-  * @brief Class to manage the backtracking output from RNA folding calculations of the strand_soup algorithm.
-  * 
-  * This class stores the sequences and pairs of nucleotides that are part of the optimal secondary structure.
-  * It provides methods to add sequences and pairs, shift indices, merge outputs from subproblems, and print the results.
-  * 
-  */
- class output_backtrack{
- 
-     public:
-     std::vector<int> list_of_sequences;
-     std::vector<std::vector<int>> list_of_pairs;
- 
-     /**
-      * @brief Add a sequence to the end of the list of sequences.
-      * 
-      * @param sequence The sequence to be added.
-      */
-     void add_sequence(int sequence){
-         list_of_sequences.push_back(sequence);
-     }
- 
-     /**
-      * @brief Add a sequence to the front of the list  of sequences.
-      * 
-      * @param sequence The sequence to be added at the front.
-      */
-     void add_sequence_front(int sequence){
-         list_of_sequences.insert(list_of_sequences.begin(),sequence);
-     }
- 
-     /**
-      * @brief Add a pair of nucleotides to the output.
-      * 
-      * @param x Index of the first strand
-      * @param i Index of the first nucleotide in strand x
-      * @param y Index of the second strand
-      * @param j Index of the second nucleotide in strand y
-      */
-     void add_pair(int x, int i, int y, int j) {
-         // std::cout << "Adding pair: (" << x << "," << i << "," << y << "," << j << ")" << std::endl;
-         list_of_pairs.push_back({x, i, y, j});
-     }
- 
-     /**
-      * @brief Shift the indices of the pairs by a given value.
-      * 
-      * This function is usefull when backtracking the output of a subproblem.
-      * 
-      * @param shift The value by which to shift the indices.
-      */
-     void shift(int shift){
-         for (int i=0; i<int(list_of_pairs.size()); i++){
-             list_of_pairs[i][0] += shift;
-             list_of_pairs[i][2] += shift;
-         }
-     }
- 
-     /**
-      * @brief Merge the current output with another output.
-      * 
-      * @param sub_output The output of the sub-problem to be merged.
-      */
-     void merge(const output_backtrack& sub_output){
-         for (const auto& seq : sub_output.list_of_sequences){
-             list_of_sequences.push_back(seq);
-         }
-         for (const auto& pair : sub_output.list_of_pairs){
-             list_of_pairs.push_back({pair[0], pair[1], pair[2], pair[3]});
-         }}
- 
-     /**
-      * @brief Print the sequences and pairs in the output.
-      */
-     void print() const{
-         std::cout << "Ordered list of sequences: ";
-         for (const auto& seq : list_of_sequences){
-             std::cout << seq << " ";
-         }
-         std::cout << std::endl;
- 
-         std::cout << "Pairs:  ";
-         for (const auto& pair : list_of_pairs){
-             std::cout << "(" << pair[0] << "," << pair[1] << "," << pair[2] << "," << pair[3] << ") ";
-         }
-         std::cout << std::endl;
-     }
- 
-     void print_dot_bracket(const std::unordered_map<int, std::string>& strands) const {
-         int n = (int)list_of_sequences.size();
-         // Build per-strand sequences (strip leading '$')
-         std::vector<std::string> seqs;
-         std::vector<int> lens;
-         for (int seq_id : list_of_sequences) {
-             const std::string& raw = strands.at(seq_id);
-             std::string clean = (raw[0] == '$') ? raw.substr(1) : raw;
-             seqs.push_back(clean);
-             lens.push_back((int)clean.size());
-         }
-         // pair_of[slot][pos] = {partner_slot, partner_pos}, 1-based; {0,0} = unpaired
-         std::vector<std::vector<std::pair<int,int>>> pair_of(n + 1);
-         for (int k = 1; k <= n; ++k)
-             pair_of[k].assign(lens[k-1] + 1, {0, 0});
-         for (const auto& p : list_of_pairs) {
-             int sx = p[0], px = p[1], sy = p[2], py = p[3];
-             if (sx >= 1 && sx <= n && px >= 1 && px <= lens[sx-1] &&
-                 sy >= 1 && sy <= n && py >= 1 && py <= lens[sy-1]) {
-                 pair_of[sx][px] = {sy, py};
-                 pair_of[sy][py] = {sx, px};
-             }
-         }
-         std::string seq_str, db_str;
-         for (int k = 1; k <= n; ++k) {
-             if (k > 1) { seq_str += '&'; db_str += '&'; }
-             for (int p = 1; p <= lens[k-1]; ++p) {
-                 seq_str += seqs[k-1][p-1];
-                 auto [ps, pp] = pair_of[k][p];
-                 if (ps == 0) {
-                     db_str += '.';
-                 } else if (ps > k || (ps == k && pp > p)) {
-                     db_str += '(';
-                 } else {
-                     db_str += ')';
-                 }
-             }
-         }
-         std::cout << seq_str << '\n' << db_str << '\n';
-     }
- };
  
  
  
@@ -416,7 +87,7 @@ static inline float E_MLstem_nd(int type, const vrna_param_t* p) {
  
   float GeneralCaseMinimization (int m, int s, int i, int r, int j, int c,
      const std::unordered_map<int, std::string>& strands,
-     Matrix5D& C, Matrix5D& M, Matrix6D& F,
+     Matrix5D<float>& C, Matrix5D<float>& M, Matrix6D<float>& F,
      const RNAEnergyEvaluator& evaluator)
  {
      // s == r is valid: two copies of the same strand type can interact (soupfold).
@@ -506,7 +177,7 @@ static inline float E_MLstem_nd(int type, const vrna_param_t* p) {
  
  void M1MultiMatrixMinimization(int m, int s, int i, int r, int j,
      const std::unordered_map<int, std::string>& strands,
-     Matrix5D& C, Matrix5D& M1_multi,
+     Matrix5D<float>& C, Matrix5D<float>& M1_multi,
      RNAEnergyEvaluator& evaluator,
      vrna_param_t* params)
  {
@@ -557,7 +228,7 @@ static inline float E_MLstem_nd(int type, const vrna_param_t* p) {
  
   void ClosedCaseMinimization(int m, int s, int i, int r, int j, 
      const std::unordered_map<int, std::string>& strands, 
-     Matrix5D& C, Matrix5D& M1_multi, Matrix6D& F, Matrix5D& M,
+     Matrix5D<float>& C, Matrix5D<float>& M1_multi, Matrix6D<float>& F, Matrix5D<float>& M,
      RNAEnergyEvaluator& evaluator, vrna_param_t* params)
  {
      const int len_s = int(strands.at(s).size()) - 1;
@@ -697,7 +368,7 @@ mismatch argument.
  
   float MultipleCaseMinimization(int m, int s, int i, int r, int j,
      const std::unordered_map<int, std::string>& strands,
-     Matrix5D& C, Matrix5D& /*M1_multi*/, Matrix5D& M, Matrix6D& F,
+     Matrix5D<float>& C, Matrix5D<float>& /*M1_multi*/, Matrix5D<float>& M, Matrix6D<float>& F,
      RNAEnergyEvaluator& evaluator, vrna_param_t *params)
  {
     // s == r is valid: two copies of the same strand type can be in a multiloop (soupfold).
@@ -811,7 +482,7 @@ mismatch argument.
  
  void MMatrixMinimization(int m, int s, int i, int r, int j,
      const std::unordered_map<int, std::string>& strands,
-     Matrix5D& C, Matrix5D& M1_multi, Matrix5D& M, Matrix6D& F,
+     Matrix5D<float>& C, Matrix5D<float>& M1_multi, Matrix5D<float>& M, Matrix6D<float>& F,
      RNAEnergyEvaluator& evaluator,
      vrna_param_t* params)
  {
@@ -837,7 +508,7 @@ mismatch argument.
   * @param params ViennaRNA thermodynamic parameter set.
   */
  void MainAuxiliaryMatrix(std::unordered_map<int, std::string> strands,
-     Matrix5D& C, Matrix5D& M,Matrix5D& M1_multi, Matrix6D& F,
+     Matrix5D<float>& C, Matrix5D<float>& M,Matrix5D<float>& M1_multi, Matrix6D<float>& F,
      RNAEnergyEvaluator& evaluator,
      vrna_param_t* params) {
          
@@ -976,7 +647,7 @@ mismatch argument.
   * @return std::vector<std::vector<int>> A vector containing all the starting points (m,s,i,r,j,c) where the minimum energy is located.
   */
  std::vector<std::vector<int>>
- Find_all_start_backtrack(Matrix6D& F, int /*n_strands*/, int c_target = 1) {
+ Find_all_start_backtrack(Matrix6D<float>& F, int /*n_strands*/, int c_target = 1) {
      std::vector<std::vector<int>> starting_points;
      float min_value = inf_energy;
  
@@ -1252,21 +923,21 @@ mismatch argument.
  output_backtrack backtrack_F_multi_square(
      int m, int s, int s_slot, int i, int r, int j, int c,
      const std::unordered_map<int, std::string>& strands,
-     Matrix5D& C, Matrix5D& M, Matrix5D& M1_multi, Matrix6D& F,
+     Matrix5D<float>& C, Matrix5D<float>& M, Matrix5D<float>& M1_multi, Matrix6D<float>& F,
      RNAEnergyEvaluator& evaluator, vrna_param_t* params, int theta
  );
  
  output_backtrack backtrack_F_multi_bubble(
      int m, int s, int s_slot, int i, int r, int j, int c,
      const std::unordered_map<int, std::string>& strands,
-     Matrix5D& C, Matrix5D& M, Matrix5D& M1_multi, Matrix6D& F,
+     Matrix5D<float>& C, Matrix5D<float>& M, Matrix5D<float>& M1_multi, Matrix6D<float>& F,
      RNAEnergyEvaluator& evaluator, vrna_param_t* params, int theta
  );
  
  output_backtrack backtrack_C_multi(
      int m, int s, int s_slot, int i, int r, int j,
      const std::unordered_map<int, std::string>& strands,
-     Matrix5D& C, Matrix5D& M, Matrix5D& M1_multi, Matrix6D& F,
+     Matrix5D<float>& C, Matrix5D<float>& M, Matrix5D<float>& M1_multi, Matrix6D<float>& F,
      RNAEnergyEvaluator& evaluator,
      vrna_param_t* params,
      int theta);
@@ -1274,7 +945,7 @@ mismatch argument.
  output_backtrack backtrack_M_multi(
      int m, int s, int s_slot, int i, int r, int j,
      const std::unordered_map<int, std::string>& strands,
-     Matrix5D& C, Matrix5D& M, Matrix5D& M1_multi, Matrix6D& F,
+     Matrix5D<float>& C, Matrix5D<float>& M, Matrix5D<float>& M1_multi, Matrix6D<float>& F,
      RNAEnergyEvaluator& evaluator,
      vrna_param_t* params,
      int theta
@@ -1284,17 +955,19 @@ mismatch argument.
  output_backtrack backtrack_M1_multi(
      int m, int s, int s_slot, int i, int r, int j,
      const std::unordered_map<int, std::string>& strands,
-     Matrix5D& C, Matrix5D& M, Matrix5D& M1_multi, Matrix6D& F,
+     Matrix5D<float>& C, Matrix5D<float>& M, Matrix5D<float>& M1_multi, Matrix6D<float>& F,
      RNAEnergyEvaluator& evaluator,
      vrna_param_t* params,
      int theta);
- 
- 
+
+
+ static inline bool bt_eq(float a, float b) { return a == b; }
+
  // This corresponds to the GeneralCaseMinimization function (bubble case).
  output_backtrack backtrack_F_multi_bubble(
      int m, int s, int s_slot, int i, int r, int j, int c,
      const std::unordered_map<int, std::string>& strands,
-     Matrix5D& C, Matrix5D& M, Matrix5D& M1_multi, Matrix6D& F,
+     Matrix5D<float>& C, Matrix5D<float>& M, Matrix5D<float>& M1_multi, Matrix6D<float>& F,
      RNAEnergyEvaluator& evaluator, vrna_param_t* params, int theta
  ) {
      output_backtrack out;
@@ -1310,7 +983,7 @@ mismatch argument.
      vrna_md_t md_bt = params->model_details;
 
      // --- Case 1 : i unpaired ---
-     if (F(m, s, i + 1, r, j, c) == best) {
+     if (bt_eq(F(m, s, i + 1, r, j, c), best)) {
          return backtrack_F_multi_square(m, s, s_slot, i + 1, r, j, c,
                                          strands, C, M, M1_multi, F,
                                          evaluator, params, theta);
@@ -1324,7 +997,7 @@ mismatch argument.
              int type_ik = vrna_get_ptype_md(S1s_bt.at(s)[i], S1s_bt.at(s)[k], &md_bt);
              float ext_pen = (type_ik > 2) ? (float)params->TerminalAU : 0.0f;
              float cand = evaluator.get_C(s)[i][k] + ext_pen + F(m, s, k + 1, r, j, c);
-             if (cand == best) {
+             if (bt_eq(cand, best)) {
                  output_backtrack left = backtrack_Cs(s, s_slot, i, k, evaluator, theta);
                  output_backtrack right =
                      backtrack_F_multi_square(m, s, s_slot, k + 1, r, j, c,
@@ -1352,7 +1025,7 @@ mismatch argument.
                      int type_ik = vrna_get_ptype_md(S1s_bt.at(s)[i], S1s_bt.at(t)[k], &md_bt);
                      float ext_pen = (type_ik > 2) ? (float)params->TerminalAU : 0.0f;
                      float cand = C(m1, s, i, t, k) + ext_pen + F(m2, t, k + 1, r, j, c);
-                     if (cand == best) {
+                     if (bt_eq(cand, best)) {
                          const int t_slot = s_slot + m1 + 1;
                          output_backtrack left =
                              backtrack_C_multi(m1, s, s_slot, i, t, k,
@@ -1382,14 +1055,14 @@ mismatch argument.
              float ext_pen = (type_ik > 2) ? (float)params->TerminalAU : 0.0f;
              if (k == len_r) {
                  float cand = C(m, s, i, r, k) + ext_pen;
-                 if (cand == best) {
+                 if (bt_eq(cand, best)) {
                      return backtrack_C_multi(m, s, s_slot, i, r, k,
                                               strands, C, M, M1_multi, F,
                                               evaluator, params, theta);
                  }
              } else {
                  float cand = C(m, s, i, r, k) + ext_pen + evaluator.get_F(r)[k + 1][j];
-                 if (cand == best) {
+                 if (bt_eq(cand, best)) {
                      output_backtrack left =
                          backtrack_C_multi(m, s, s_slot, i, r, k,
                                            strands, C, M, M1_multi, F,
@@ -1403,9 +1076,9 @@ mismatch argument.
          }
      }
  
-     std::cerr << "BT FAIL in backtrack_X: "
-     << "m="<<m<<" s="<<s<<" i="<<i<<" r="<<r<<" j="<<j
-     << " best="<<best << "\n";
+     std::cerr << "BT FAIL in backtrack_F_multi_bubble:"
+         << " m="<<m<<" s="<<s<<" i="<<i<<" r="<<r<<" j="<<j<<" c="<<c
+         << " best="<<best << "\n";
      return output_backtrack();
  }
  // This corresponds to the MainAuxiliaryMatrix function (square case).
@@ -1413,7 +1086,7 @@ mismatch argument.
  output_backtrack backtrack_F_multi_square(
      int m, int s, int s_slot, int i, int r, int j, int c,
      const std::unordered_map<int, std::string>& strands,
-     Matrix5D& C, Matrix5D& M, Matrix5D& M1_multi, Matrix6D& F,
+     Matrix5D<float>& C, Matrix5D<float>& M, Matrix5D<float>& M1_multi, Matrix6D<float>& F,
      RNAEnergyEvaluator& evaluator, vrna_param_t* params, int theta
  ) {
      output_backtrack out;
@@ -1439,7 +1112,7 @@ mismatch argument.
                  // F(m,s,|s|+1,r,j,0) = min_t F(m-1,t,1,r,j,1)
                  for (int t = 1; t <= F.get_s_size(); ++t) {
                     // Any strand type allowed as intermediate (soupfold).
-                     if (F(m, s, i, r, j, c) == F(m - 1, t, 1, r, j, 1)) {
+                     if (bt_eq(F(m, s, i, r, j, c), F(m - 1, t, 1, r, j, 1))) {
                          output_backtrack sub =
                              backtrack_F_multi_square(m - 1, t, s_slot + 1, 1, r, j, 1,
                                                       strands, C, M, M1_multi, F,
@@ -1473,7 +1146,7 @@ mismatch argument.
                  for (int t = 1; t <= F.get_s_size(); ++t) {
                     // Any strand type allowed as intermediate (soupfold).
                      int len_t = int(strands.at(t).size()) - 1;
-                     if (F(m, s, i, r, j, c) == F(m - 1, s, i, t, len_t, 1)) {
+                     if (bt_eq(F(m, s, i, r, j, c), F(m - 1, s, i, t, len_t, 1))) {
                          output_backtrack sub =
                              backtrack_F_multi_square(m - 1, s, s_slot, i, t, len_t, 1,
                                                       strands, C, M, M1_multi, F,
@@ -1504,7 +1177,7 @@ mismatch argument.
  output_backtrack backtrack_C_multi(
      int m, int s, int s_slot, int i, int r, int j,
      const std::unordered_map<int, std::string>& strands,
-     Matrix5D& C, Matrix5D& M, Matrix5D& M1_multi, Matrix6D& F,
+     Matrix5D<float>& C, Matrix5D<float>& M, Matrix5D<float>& M1_multi, Matrix6D<float>& F,
      RNAEnergyEvaluator& evaluator,
      vrna_param_t* params,
      int theta)
@@ -1539,7 +1212,7 @@ mismatch argument.
              if (!can_pair(seq_s[k], seq_r[l])) continue;
              float loop_energy = evaluator.interior_loop_energy_cross(s, i, r, j, k, l);
              float cand = C(m, s, k, r, l) + loop_energy;
-             if (cand == best) {
+             if (bt_eq(cand, best)) {
                  output_backtrack inner =
                      backtrack_C_multi(m, s, s_slot, k, r, l,
                                        strands, C, M, M1_multi, F, evaluator, params, theta);
@@ -1553,7 +1226,7 @@ mismatch argument.
      for (int k = i + theta + 1; k <= len_s; ++k) {
          float ml_energy = params->MLclosing + mlintern_closing_bt + evaluator.get_M1(s)[i + 1][k];
          float cand = ml_energy + M(m, s, k + 1, r, j - 1);
-         if (cand == best) {
+         if (bt_eq(cand, best)) {
              // left: M1 on single strand s
              output_backtrack left = backtrack_M1s(s, s_slot, i + 1, k, evaluator, theta);
              // right: multi-strand M
@@ -1583,7 +1256,7 @@ mismatch argument.
                        + M1_multi(m1, s, i + 1, t, k)
                        + M(m2, t, k + 1, r, j - 1);
  
-                       if (cand == best) {
+                       if (bt_eq(cand, best)) {
                         const int t_slot = s_slot + m1 + 1;
                          output_backtrack left =
                              backtrack_M1_multi(m1, s, s_slot, i + 1, t, k,
@@ -1616,7 +1289,7 @@ mismatch argument.
                  params->MLclosing
                + mlintern_closing_bt
                + M1_multi(m, s, i + 1, r, k);
-             if (cand == best) {
+             if (bt_eq(cand, best)) {
                  output_backtrack left =
                      backtrack_M1_multi(m, s, s_slot, i + 1, r, k,
                                         strands, C, M, M1_multi, F, evaluator, params, theta);
@@ -1631,7 +1304,7 @@ mismatch argument.
               
                + evaluator.get_M(r)[k + 1][j - 1];
  
-             if (cand == best) {
+             if (bt_eq(cand, best)) {
                  output_backtrack left =
                      backtrack_M1_multi(m, s, s_slot, i + 1, r, k,
                                         strands, C, M, M1_multi, F, evaluator, params, theta);
@@ -1647,7 +1320,7 @@ mismatch argument.
      // --- Case 5: external disconnect ---
      {
          float term_au_c5 = (type_ij_bt > 2) ? (float)params->TerminalAU : 0.0f;
-         if (term_au_c5 + F(m, s, i + 1, r, j - 1, 0) == best) {
+         if (bt_eq(term_au_c5 + F(m, s, i + 1, r, j - 1, 0), best)) {
              output_backtrack inner =
                  backtrack_F_multi_square(m, s, s_slot, i + 1, r, j - 1, 0,
                                          strands, C, M, M1_multi, F, evaluator, params, theta);
@@ -1656,16 +1329,15 @@ mismatch argument.
          }
      }
 
-     std::cerr << "BT FAIL in backtrack_X: "
-     << "m="<<m<<" s="<<s<<" i="<<i<<" r="<<r<<" j="<<j
-     << " best="<<best << "\n";
+     std::cerr << "BT FAIL in backtrack_C_multi:"
+         << " m="<<m<<" s="<<s<<" i="<<i<<" r="<<r<<" j="<<j<<" best="<<best<<"\n";
      return out;
  }
- 
+
  output_backtrack backtrack_M_multi(
      int m, int s, int s_slot, int i, int r, int j,
      const std::unordered_map<int, std::string>& strands,
-     Matrix5D& C, Matrix5D& M, Matrix5D& M1_multi, Matrix6D& F,
+     Matrix5D<float>& C, Matrix5D<float>& M, Matrix5D<float>& M1_multi, Matrix6D<float>& F,
      RNAEnergyEvaluator& evaluator,
      vrna_param_t* params,
      int theta) {
@@ -1682,7 +1354,7 @@ mismatch argument.
      int len_s = int(seq_s.length()) - 1;
      int len_r = int(seq_r.length()) - 1;
      // --- Case 1 : i unpaired ---
-     if (M(m, s, i + 1, r, j) + params->MLbase == best) {
+     if (bt_eq(M(m, s, i + 1, r, j) + params->MLbase, best)) {
          return backtrack_M_multi(m, s, s_slot, i + 1, r, j,
                                   strands, C, M, M1_multi, F, evaluator, params, theta);
      }
@@ -1696,7 +1368,7 @@ mismatch argument.
              if (type == 0) continue;
          float cand = evaluator.get_C(s)[i][k] + E_MLstem_nd(type, params)
                     + M(m, s, k + 1, r, j);
-         if (cand == best) {
+         if (bt_eq(cand, best)) {
              output_backtrack left = backtrack_Cs(s, s_slot, i, k, evaluator, theta);
              output_backtrack right =
                  backtrack_M_multi(m, s, s_slot, k + 1, r, j,
@@ -1724,7 +1396,7 @@ mismatch argument.
                      float cand = C(m1, s, i, t, k)
                                 + E_MLstem_nd(type, params)
                                 + M(m2, t, k + 1, r, j);
-                                if (cand == best) {
+                                if (bt_eq(cand, best)) {
                                  const int t_slot = s_slot + m1 + 1;
                                  output_backtrack left =
                                      backtrack_C_multi(m1, s, s_slot, i, t, k,
@@ -1749,15 +1421,16 @@ mismatch argument.
      }
  
      // --- Case 4 : i pairs with r at k ---
-     for (int k = 1; k <= j - 1; ++k) {
+     int kmax = std::min(j, len_r);
+     for (int k = 1; k <= kmax; ++k) {
          if (!can_pair(seq_s[i], seq_r[k])) continue;
- 
+
          int type = vrna_get_ptype_md(
              S1s.at(s)[i], S1s.at(r)[k], &params->model_details);
- 
-         if (k == len_r) {
+
+         if (k == j) {
              float cand = C(m, s, i, r, k) + E_MLstem_nd(type, params);
-             if (cand == best) {
+             if (bt_eq(cand, best)) {
                  output_backtrack left =
                      backtrack_C_multi(m, s, s_slot, i, r, k,
                                        strands, C, M, M1_multi, F, evaluator, params, theta);
@@ -1767,8 +1440,8 @@ mismatch argument.
              float cand =
              C(m, s, i, r, k) + E_MLstem_nd(type, params)
                + evaluator.get_M(r)[k + 1][j];
- 
-             if (cand == best) {
+
+             if (bt_eq(cand, best)) {
                  output_backtrack left =
                      backtrack_C_multi(m, s, s_slot, i , r, k,
                                         strands, C, M, M1_multi, F, evaluator, params, theta);
@@ -1790,7 +1463,7 @@ mismatch argument.
  output_backtrack backtrack_M1_multi(
      int m, int s, int s_slot, int i, int r, int j,
      const std::unordered_map<int, std::string>& strands,
-     Matrix5D& C, Matrix5D& M, Matrix5D& M1_multi, Matrix6D& F,
+     Matrix5D<float>& C, Matrix5D<float>& M, Matrix5D<float>& M1_multi, Matrix6D<float>& F,
      RNAEnergyEvaluator& evaluator,
      vrna_param_t* params,
      int theta)
@@ -1806,7 +1479,7 @@ mismatch argument.
      // --- Case 1: i unpaired ---
      if (i < len_s) {
          float cand = M1_multi(m, s, i + 1, r, j) + params->MLbase;
-         if (cand == best) {
+         if (bt_eq(cand, best)) {
              return backtrack_M1_multi(m, s, s_slot, i + 1, r, j,
                                        strands, C, M, M1_multi, F,
                                        evaluator, params, theta);
@@ -1821,7 +1494,7 @@ mismatch argument.
          if (type != 0) {
              float cand2 = C(m, s, i, r, j) + E_MLstem_nd(type, params);
  
-             if (cand2 == best) {
+             if (bt_eq(cand2, best)) {
                  output_backtrack inner =
                      backtrack_C_multi(m, s, s_slot, i, r, j,
                                        strands, C, M, M1_multi, F,
@@ -1841,7 +1514,7 @@ mismatch argument.
  
  std::vector<output_backtrack> full_backtrack(
      const std::unordered_map<int, std::string>& strands,
-     Matrix5D& C, Matrix5D& M, Matrix5D& M1_multi, Matrix6D& F,
+     Matrix5D<float>& C, Matrix5D<float>& M, Matrix5D<float>& M1_multi, Matrix6D<float>& F,
      RNAEnergyEvaluator& evaluator,
      vrna_param_t* params,
      int theta
@@ -2041,10 +1714,10 @@ mismatch argument.
               int j_size = int(strand2.length()) - 1;
               int c_size = 2; // connectivity 0 or 1
   
-              Matrix5D C(m_size, s_size, i_size, r_size, j_size);
-              Matrix5D M(m_size, s_size, i_size, r_size, j_size);
-              Matrix5D M1_multi(m_size, s_size, i_size, r_size, j_size);
-              Matrix6D F(m_size, s_size, i_size, r_size, j_size, c_size);
+              Matrix5D<float> C(m_size, s_size, i_size, r_size, j_size);
+              Matrix5D<float> M(m_size, s_size, i_size, r_size, j_size);
+              Matrix5D<float> M1_multi(m_size, s_size, i_size, r_size, j_size);
+              Matrix6D<float> F(m_size, s_size, i_size, r_size, j_size, c_size);
   
               MainAuxiliaryMatrix(strands, C, M, M1_multi, F, evaluator, params);
   
@@ -2166,10 +1839,10 @@ mismatch argument.
      int j_size = seq_len;
      int c_size = 2;
  
-     Matrix5D C(m_size, s_size, i_size, r_size, j_size);
-     Matrix5D M(m_size, s_size, i_size, r_size, j_size);
-     Matrix5D M1_multi(m_size, s_size, i_size, r_size, j_size);
-     Matrix6D F(m_size, s_size, i_size, r_size, j_size, c_size);
+     Matrix5D<float> C(m_size, s_size, i_size, r_size, j_size);
+     Matrix5D<float> M(m_size, s_size, i_size, r_size, j_size);
+     Matrix5D<float> M1_multi(m_size, s_size, i_size, r_size, j_size);
+     Matrix6D<float> F(m_size, s_size, i_size, r_size, j_size, c_size);
      auto t2 = std::chrono::high_resolution_clock::now();
      try {
          MainAuxiliaryMatrix(strands, C, M, M1_multi, F, evaluator, params);
@@ -2243,7 +1916,7 @@ mismatch argument.
  
      std::unordered_map<int, std::string> strands;
     // Use one entry per strand type; m_start controls total strands in complex.
-    strands[1] = "$" + base;  // add $ for 1-based indexing
+    strands[1] = "$" + base;  // adding a $ for 1-based indexing
  
          RNAEnergyEvaluator evaluator(strands);
          vrna_param_t* params = evaluator.get_params();
@@ -2255,10 +1928,10 @@ mismatch argument.
          int j_size = length;
          int c_size = 2;
      
-         Matrix5D C(m_size, s_size, i_size, r_size, j_size);
-         Matrix5D M(m_size, s_size, i_size, r_size, j_size);
-         Matrix5D M1_multi(m_size, s_size, i_size, r_size, j_size);
-         Matrix6D F(m_size, s_size, i_size, r_size, j_size, c_size);
+         Matrix5D<float> C(m_size, s_size, i_size, r_size, j_size);
+         Matrix5D<float> M(m_size, s_size, i_size, r_size, j_size);
+         Matrix5D<float> M1_multi(m_size, s_size, i_size, r_size, j_size);
+         Matrix6D<float> F(m_size, s_size, i_size, r_size, j_size, c_size);
        
      
          MainAuxiliaryMatrix(strands, C, M, M1_multi, F, evaluator, params);
@@ -2306,10 +1979,10 @@ mismatch argument.
  
      int c_size = 2;
  
-     Matrix5D C(m_size, s_size, i_size, r_size, j_size);
-     Matrix5D M(m_size, s_size, i_size, r_size, j_size);
-     Matrix5D M1_multi(m_size, s_size, i_size, r_size, j_size);
-     Matrix6D F(m_size, s_size, i_size, r_size, j_size, c_size);
+     Matrix5D<float> C(m_size, s_size, i_size, r_size, j_size);
+     Matrix5D<float> M(m_size, s_size, i_size, r_size, j_size);
+     Matrix5D<float> M1_multi(m_size, s_size, i_size, r_size, j_size);
+     Matrix6D<float> F(m_size, s_size, i_size, r_size, j_size, c_size);
  
      auto t2 = std::chrono::high_resolution_clock::now();
      MainAuxiliaryMatrix(strands, C, M, M1_multi, F, evaluator, params);
@@ -2370,10 +2043,10 @@ mismatch argument.
  int j_size = (int)strands.at(1).length() - 1; 
  int c_size = 2;
  
- Matrix5D C(m_size, s_size, i_size, r_size, j_size);
- Matrix5D M(m_size, s_size, i_size, r_size, j_size);
- Matrix5D M1_multi(m_size, s_size, i_size, r_size, j_size);
- Matrix6D F(m_size, s_size, i_size, r_size, j_size, c_size);
+ Matrix5D<float> C(m_size, s_size, i_size, r_size, j_size);
+ Matrix5D<float> M(m_size, s_size, i_size, r_size, j_size);
+ Matrix5D<float> M1_multi(m_size, s_size, i_size, r_size, j_size);
+ Matrix6D<float> F(m_size, s_size, i_size, r_size, j_size, c_size);
  auto t2 = std::chrono::high_resolution_clock::now();
  
  try {
@@ -2453,10 +2126,10 @@ void run_heterogeneous_general(const std::vector<std::string>& sequences, int m_
     vrna_param_t* params = evaluator.get_params();
     auto t1 = std::chrono::high_resolution_clock::now();
 
-    Matrix5D C       (m_size, s_size, i_size, r_size, j_size);
-    Matrix5D M       (m_size, s_size, i_size, r_size, j_size);
-    Matrix5D M1_multi(m_size, s_size, i_size, r_size, j_size);
-    Matrix6D F       (m_size, s_size, i_size, r_size, j_size, c_size);
+    Matrix5D<float> C       (m_size, s_size, i_size, r_size, j_size);
+    Matrix5D<float> M       (m_size, s_size, i_size, r_size, j_size);
+    Matrix5D<float> M1_multi(m_size, s_size, i_size, r_size, j_size);
+    Matrix6D<float> F       (m_size, s_size, i_size, r_size, j_size, c_size);
     auto t2 = std::chrono::high_resolution_clock::now();
 
     MainAuxiliaryMatrix(strands, C, M, M1_multi, F, evaluator, params);
@@ -2510,7 +2183,7 @@ void run_heterogeneous_general(const std::vector<std::string>& sequences, int m_
      //run_random_homogeneous_soup(60, m_start, 1111);
      //run_homogeneous("AGGUACCUAAUUGCCUAGAAAACAUGAGGAUCACCCAUG", 1, m_start);
  
-    run_homogeneous_soup("CGG", 16, 5);
+    run_homogeneous_soup("UAG", 26, 5);
     //run_homogeneous_soup("CAU", repeats, m_start);
  
     //run_heterogeneous_triplets({"CAG", "GAU", "UAG","CCG"}, 10);
